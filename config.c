@@ -1401,6 +1401,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
         { IDC_UNIKEYHOLDMENU,   T_BOL, 0, TEXT("Input"), "UniKeyHoldMenu", 0},
         { IDC_KEYCOMBO,         T_BOL, 0, TEXT("Input"), "KeyCombo", 0 },
         { IDC_USEPTWINDOW,      T_BOL, 0, TEXT("KBShortcuts"), "UsePtWindow", 0},
+        { IDC_CT_HOLD,          T_BOL, 0, TEXT("KBShortcuts"), "ClickThroughHoldMode", (void*)1},
     };
 
     LPNMHDR pnmh = (LPNMHDR) lParam;
@@ -1608,6 +1609,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
                 { IDC_SHORTCUTS_SET,   L10NIDX(InputHotkeysShortcutsSet) },
                 { IDC_USEPTWINDOW,     L10NIDX(InputHotkeysUsePtWindow) },
                 { IDC_CT_TRANSP_H,     L10NIDX(InputClickThroughTransparency) },
+                { IDC_CT_HOLD,         L10NIDX(InputClickThroughHold) },
                 { IDC_LEFTALT,         L10NIDX(InputHotkeysLeftAlt) },
                 { IDC_RIGHTALT,        L10NIDX(InputHotkeysRightAlt) },
                 { IDC_LEFTWINKEY,      L10NIDX(InputHotkeysLeftWinkey) },

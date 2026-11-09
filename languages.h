@@ -181,6 +181,7 @@ struct langinfoitem {
   LNGVALUE(InputHotkeysShortcutsSet,   TEXT("Sa&ve"), NULL) \
   LNGVALUE(InputHotkeysUsePtWindow,    TEXT("Apply to the &pointed window"), NULL) \
   LNGVALUE(InputClickThroughTransparency, TEXT("Click-through transparency:"), NULL) \
+  LNGVALUE(InputClickThroughHold, TEXT("Activate ClickThrough while the shortcut is &held (release to restore)"), NULL) \
   LNGVALUE(InputHotkeysLeftAlt,        TEXT("L&eft Alt"), NULL) \
   LNGVALUE(InputHotkeysRightAlt,       TEXT("&Right Alt"), NULL) \
   LNGVALUE(InputHotkeysLeftWinkey,     TEXT("Left &Winkey"), NULL) \

@@ -270,6 +270,7 @@ static struct config {
   #endif
     // [KBShortcuts]
     UCHAR UsePtWindow;
+    UCHAR ClickThroughHoldMode;
     // -- -- -- -- -- -- --
     UCHAR keepMousehook;
     UCHAR EndSendKey; // Used to be VK_CONTROL
@@ -2728,6 +2729,10 @@ static void ToggleSnapState(void)
 }
 static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
+// ClickThrough "hold" mode state.
+static UCHAR g_ct_hotkey_vk = 0;   // VK of the ClickThrough shortcut.
+static int g_ct_hold_active = 0;   // Shortcut is held; click-through is active.
+static void RestoreClickThrough(void);
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
 #ifdef __cplusplus
@@ -2916,6 +2921,11 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             }
         }
     } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
+        if (g_ct_hold_active && conf.ClickThroughHoldMode && g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) {
+            // The ClickThrough shortcut was released: restore the window.
+            RestoreClickThrough();
+            g_ct_hold_active = 0;
+        }
         if (IsHotkey(vkey)) {
             //LOGA("ALT UP");
             HotkeyUp();
@@ -5497,7 +5507,9 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 //        LOGA("wParam=%lx, data=%lx, time=%lu, extra=%lx, block?=%d, ignored?=%d", (DWORD)wParam
 //            , (DWORD)msg->mouseData, (DWORD)msg->time, (DWORD)msg->dwExtraInfo
 //            , (int)state.blockmouseup, (int)state.ignoreclick);
-    if (nCode != HC_ACTION || state.ignoreclick || ScrollLockState())
+    // While the ClickThrough shortcut is held, do not intercept the mouse so
+    // that the user can keep operating other windows normally.
+    if (nCode != HC_ACTION || state.ignoreclick || ScrollLockState() || g_ct_hold_active)
         return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     // Mouse move, only if it is not exactly the same point than before
@@ -6230,6 +6242,18 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             GetMsgPT(&pt);
             static const enum action noinitactions[] = { AC_KILL, AC_PAUSE, AC_RESUME, AC_ASONOFF, AC_CLICKTHROUGH, AC_NONE };
             if (IsActionInList((enum action)action.ac, noinitactions)) {
+                // ClickThrough hold mode: activate while the shortcut is held
+                // down; the keyboard hook restores it on release.
+                if (action.ac == AC_CLICKTHROUGH && conf.ClickThroughHoldMode && wParam > 0xC000) {
+                    if (!g_ct_hold_active) {
+                        HWND thw = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
+                        if (IsWindow(thw)) {
+                            g_ct_hold_active = 1;
+                            SClickActions(thw, action);
+                        }
+                    }
+                    return 0;
+                }
                 // Some actions pass directly through the default blacklists...
                 HWND targethwnd = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
                 // ClickThrough may need to restore the tracked window even when
@@ -6604,6 +6628,7 @@ void registerAllHotkeys(const TCHAR* inipath)
     GetPrivateProfileSection(TEXT("KBShortcuts"), inisection, ARR_SZ(inisection), inipath);
 
     conf.UsePtWindow = GetSectionOptionInt(inisection, "UsePtWindow", 0);
+    conf.ClickThroughHoldMode = GetSectionOptionInt(inisection, "ClickThroughHoldMode", 1);
 
     #define ACVALUE(a, b, c) (#b),
     static const char *action_names[] = { ACTION_MAP };
@@ -6624,6 +6649,7 @@ void registerAllHotkeys(const TCHAR* inipath)
             // Lobyte is the virtual key code and hibyte is the mod_key
             if (RegisterHotKey(g_mainhwnd, 0xC001 + idx, HIBYTE(HK), LOBYTE(HK))) {
                 conf.KBShortcutsList[idx] = action; // Add action to the list
+                if (action.ac == AC_CLICKTHROUGH) g_ct_hotkey_vk = LOBYTE(HK);
                 LOG("OK registering hotkey %s_%d_%d=%x, [idx=%d]", action_names[action.ac], (int)action.fl, (int)action.wp, (unsigned)HK, (int)idx);
                 idx++;
             } else {

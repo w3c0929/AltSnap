@@ -212,5 +212,6 @@
 #define IDC_SIDESFRACTION               2107
 #define IDC_CT_TRANSP_H                 2108
 #define IDC_CT_TRANSP                   2109
+#define IDC_CT_HOLD                     2110
 
 #endif // AS_RESOURCE_H
