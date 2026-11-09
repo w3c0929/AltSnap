@@ -4867,6 +4867,10 @@ static void RestoreClickThrough(void)
     // Restore the original opacity if we were the one changing it.
     if (g_ct_alpha_changed && (g_ct_exstyle & WS_EX_LAYERED))
         SetLayeredWindowAttributes(hwnd, 0, g_ct_oldalpha, LWA_ALPHA);
+
+    // Restore the original always-on-top state.
+    SetWindowPos(hwnd, (g_ct_exstyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST,
+                 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     g_ct_alpha_changed = 0;
 }
 
@@ -4909,6 +4913,9 @@ static void ActionClickThrough(HWND hwnd)
     // Only lower the opacity when the window is not already transparent.
     if (!already_transparent)
         SetLayeredWindowAttributes(hwnd, 0, CLICKTHROUGH_ALPHA, LWA_ALPHA);
+
+    // Keep the click-through window on top of the other windows.
+    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 }
 
 /////////////////////////////////////////////////////////////////////////////
