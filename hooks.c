@@ -2743,8 +2743,7 @@ static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persist
 static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
 static HWND g_ct_focus_cand = NULL;  // Hover-focus candidate while click-through is active.
 static int g_ct_focus_cnt = 0;       // Ticks the candidate has been under the pointer.
-static HWND g_ct_last_target = NULL;      // Last window we made click-through.
-static DWORD g_ct_last_restore_tick = 0;  // When it was last restored.
+static HWND g_ct_last_target = NULL;      // Locked target window for the click-through.
 static int g_ct_toggle_consumed = 0;      // A toggle was already handled for this key press.
 // Parse a hexadecimal pointer value.
 static ULONG_PTR CtHex2Ptr(const TCHAR *s)
@@ -4974,7 +4973,6 @@ static void RestoreClickThrough(void)
     HWND hwnd = g_ct_hwnd;
     g_ct_hwnd = NULL;
     g_ct_last_target = hwnd;
-    g_ct_last_restore_tick = GetTickCount();
     KillTimer(g_mainhwnd, CTFOCUS_TIMER);
     g_ct_focus_cand = NULL;
     g_ct_focus_cnt = 0;
@@ -5014,12 +5012,13 @@ static void ActionClickThrough(HWND hwnd)
         RestoreClickThrough();           // the tracked window is gone; clear it
     }
 
-    // During rapid toggling, do not switch to whatever window hover-focus or
-    // the foreground happened to land on: if the previous click-through was
-    // restored very recently, re-apply it to that same window.
-    if (g_ct_last_target && IsWindow(g_ct_last_target)
-    && (DWORD)(GetTickCount() - g_ct_last_restore_tick) < 1000) {
-        hwnd = g_ct_last_target;
+    // Always stick to the same target window until it is closed, so repeating
+    // the shortcut never drifts to a window that hovering/clicking focused.
+    if (g_ct_last_target) {
+        if (IsWindow(g_ct_last_target))
+            hwnd = g_ct_last_target;
+        else
+            g_ct_last_target = NULL; // target gone; allow picking a new one
     }
 
     // Apply to the top-level window rather than a clicked child control.
