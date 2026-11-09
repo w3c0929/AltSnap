@@ -2743,6 +2743,9 @@ static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persist
 static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
 static HWND g_ct_focus_cand = NULL;  // Hover-focus candidate while click-through is active.
 static int g_ct_focus_cnt = 0;       // Ticks the candidate has been under the pointer.
+static HWND g_ct_last_target = NULL;      // Last window we made click-through.
+static DWORD g_ct_last_restore_tick = 0;  // When it was last restored.
+static int g_ct_toggle_consumed = 0;      // A toggle was already handled for this key press.
 // Parse a hexadecimal pointer value.
 static ULONG_PTR CtHex2Ptr(const TCHAR *s)
 {
@@ -2779,6 +2782,7 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             g_ct_key_down = 1;
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             g_ct_key_down = 0;
+            g_ct_toggle_consumed = 0;
             KillTimer(g_mainhwnd, CTHOLD_TIMER);
             if (g_ct_hold_active && conf.ClickThroughHoldMode) {
                 RestoreClickThrough();
@@ -4969,6 +4973,8 @@ static void RestoreClickThrough(void)
 {
     HWND hwnd = g_ct_hwnd;
     g_ct_hwnd = NULL;
+    g_ct_last_target = hwnd;
+    g_ct_last_restore_tick = GetTickCount();
     KillTimer(g_mainhwnd, CTFOCUS_TIMER);
     g_ct_focus_cand = NULL;
     g_ct_focus_cnt = 0;
@@ -5008,6 +5014,14 @@ static void ActionClickThrough(HWND hwnd)
         RestoreClickThrough();           // the tracked window is gone; clear it
     }
 
+    // During rapid toggling, do not switch to whatever window hover-focus or
+    // the foreground happened to land on: if the previous click-through was
+    // restored very recently, re-apply it to that same window.
+    if (g_ct_last_target && IsWindow(g_ct_last_target)
+    && (DWORD)(GetTickCount() - g_ct_last_restore_tick) < 1000) {
+        hwnd = g_ct_last_target;
+    }
+
     // Apply to the top-level window rather than a clicked child control.
     HWND root = GetAncestor(hwnd, GA_ROOT);
     if (root) hwnd = root;
@@ -5024,6 +5038,7 @@ static void ActionClickThrough(HWND hwnd)
     int already_transparent = have_alpha && alpha != 255;
 
     g_ct_hwnd = hwnd;
+    g_ct_last_target = hwnd;
     g_ct_exstyle = exstyle;
     g_ct_oldalpha = have_alpha ? alpha : 255;
     g_ct_alpha_changed = !already_transparent;
@@ -6427,6 +6442,12 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         }
                     }
                     return 0;
+                }
+                if (action.ac == AC_CLICKTHROUGH && !conf.ClickThroughHoldMode && wParam > 0xC000) {
+                    // Toggle mode: ignore key auto-repeat so holding the shortcut
+                    // does not toggle several times.
+                    if (g_ct_key_down && g_ct_toggle_consumed) return 0;
+                    if (g_ct_key_down) g_ct_toggle_consumed = 1;
                 }
                 if (action.ac == AC_CLICKTHROUGH && g_ct_hwnd) {
                     // Toggle mode / CLI: restore the active click-through.
