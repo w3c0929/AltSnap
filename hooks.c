@@ -22,6 +22,7 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 //#define ALTUP_TIMER     (5)
 #define HIDELAYOUT_TIMER  (6)
 #define POOL_TIMER        (7)
+#define CTHOLD_TIMER      (8)
 
 #define WM_DOWORK        (WM_APP+6)
 #define WM_DOMOUSEMOVE   (WM_APP+7)
@@ -2759,6 +2760,7 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             g_ct_key_down = 1;
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             g_ct_key_down = 0;
+            KillTimer(g_mainhwnd, CTHOLD_TIMER);
             if (g_ct_hold_active && conf.ClickThroughHoldMode) {
                 RestoreClickThrough();
                 g_ct_hold_active = 0;
@@ -5809,6 +5811,17 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
         }
         } break;
     #endif
+    case CTHOLD_TIMER: {
+        // Safety net for ClickThrough hold mode: if the shortcut key is no
+        // longer down but the key-up was not seen, restore the window anyway.
+        if (!g_ct_hold_active) {
+            KillTimer(hwnd, CTHOLD_TIMER);
+        } else if (g_ct_hotkey_vk && !(GetAsyncKeyState(g_ct_hotkey_vk) & 0x8000)) {
+            RestoreClickThrough();
+            g_ct_hold_active = 0;
+            KillTimer(hwnd, CTHOLD_TIMER);
+        }
+        } break;
     case SPEED_TIMER: {
         static POINT oldpt;
         static int has_moved_to_fixed_pt;
@@ -6262,6 +6275,9 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     // this queued message may be handled after the key-up.
                     if (!g_ct_hold_active && g_ct_key_down) {
                         g_ct_hold_active = 1;
+                        // Poll for the release as a safety net (the key-up
+                        // event can occasionally be missed).
+                        SetTimer(g_mainhwnd, CTHOLD_TIMER, 100, (TIMERPROC)TimerWindowProc);
                         // Drop a stale tracked window before deciding.
                         if (g_ct_hwnd && !IsWindow(g_ct_hwnd)) RestoreClickThrough();
                         if (!g_ct_hwnd) { // only one click-through at a time
