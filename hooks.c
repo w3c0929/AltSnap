@@ -2750,6 +2750,22 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
 #pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
 #endif
 
+    // Track the ClickThrough shortcut key before the early returns below, so a
+    // release is never missed (e.g. while AltSnap is sending its own keys or
+    // ScrollLock is on) and can always restore the window.
+    if (nCode == HC_ACTION && g_ct_hotkey_vk
+    && ((PKBDLLHOOKSTRUCT)lParam)->vkCode == g_ct_hotkey_vk) {
+        if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            g_ct_key_down = 1;
+        } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
+            g_ct_key_down = 0;
+            if (g_ct_hold_active && conf.ClickThroughHoldMode) {
+                RestoreClickThrough();
+                g_ct_hold_active = 0;
+            }
+        }
+    }
+
     if (nCode != HC_ACTION || state.ignorekey) return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     PKBDLLHOOKSTRUCT kbh = ((PKBDLLHOOKSTRUCT)lParam);
@@ -2765,7 +2781,6 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
     if (ScrollLockState()) return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-        if (g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) g_ct_key_down = 1;
         if (!state.alt && !state.action.ac
         && (!conf.KeyCombo || (state.alt1 && state.alt1 != vkey))
         && IsHotkey(vkey)
@@ -2928,14 +2943,6 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             }
         }
     } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
-        if (g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) {
-            g_ct_key_down = 0;
-            if (g_ct_hold_active && conf.ClickThroughHoldMode) {
-                // The ClickThrough shortcut was released: restore the window.
-                RestoreClickThrough();
-                g_ct_hold_active = 0;
-            }
-        }
         if (IsHotkey(vkey)) {
             //LOGA("ALT UP");
             HotkeyUp();
@@ -6255,6 +6262,8 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     // this queued message may be handled after the key-up.
                     if (!g_ct_hold_active && g_ct_key_down) {
                         g_ct_hold_active = 1;
+                        // Drop a stale tracked window before deciding.
+                        if (g_ct_hwnd && !IsWindow(g_ct_hwnd)) RestoreClickThrough();
                         if (!g_ct_hwnd) { // only one click-through at a time
                             HWND thw = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
                             if (IsWindow(thw)) ActionClickThrough(thw);
