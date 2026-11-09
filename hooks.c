@@ -2731,20 +2731,14 @@ static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
 // ClickThrough "hold" mode state.
 static UCHAR g_ct_hotkey_vk = 0;   // VK of the ClickThrough shortcut.
-static UCHAR g_ct_hotkey_mod = 0;  // Modifiers of the ClickThrough shortcut.
+static int g_ct_key_down = 0;      // Is the ClickThrough shortcut key physically down?
 static int g_ct_hold_active = 0;   // Shortcut is held; click-through is active.
+static HWND g_ct_hwnd = NULL;      // Window currently in click-through state.
+static LONG_PTR g_ct_exstyle = 0;  // Original extended style.
+static BYTE g_ct_oldalpha = 255;   // Original alpha (255 if not layered).
+static int g_ct_alpha_changed = 0; // Did we change the alpha?
 static void RestoreClickThrough(void);
 static void ActionClickThrough(HWND hwnd);
-// Return true when the currently pressed modifiers match the shortcut's.
-static int ClickThroughModsMatch(UCHAR mod)
-{
-    UCHAR cur = 0;
-    if (GetAsyncKeyState(VK_LWIN)&0x8000 || GetAsyncKeyState(VK_RWIN)&0x8000) cur |= 8;
-    if (GetAsyncKeyState(VK_MENU)&0x8000) cur |= 1;
-    if (GetAsyncKeyState(VK_CONTROL)&0x8000) cur |= 2;
-    if (GetAsyncKeyState(VK_SHIFT)&0x8000) cur |= 4;
-    return cur == mod;
-}
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
 #ifdef __cplusplus
@@ -2771,27 +2765,7 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
     if (ScrollLockState()) return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
-        // ClickThrough hold mode: activate on the shortcut key down. Doing it
-        // here (same event stream as the key release) avoids a race with the
-        // queued WM_HOTKEY message that could leave the window stuck.
-        if (conf.ClickThroughHoldMode && g_ct_hotkey_vk && vkey == g_ct_hotkey_vk
-        && ClickThroughModsMatch(g_ct_hotkey_mod)) {
-            if (!g_ct_hold_active) {
-                HWND thw;
-                if (conf.UsePtWindow) {
-                    POINT kpt;
-                    GetCursorPos(&kpt);
-                    thw = WindowFromPoint(kpt);
-                } else {
-                    thw = GetForegroundWindow();
-                }
-                if (thw) thw = GetAncestor(thw, GA_ROOT);
-                if (IsWindow(thw)) {
-                    g_ct_hold_active = 1;
-                    ActionClickThrough(thw);
-                }
-            }
-        }
+        if (g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) g_ct_key_down = 1;
         if (!state.alt && !state.action.ac
         && (!conf.KeyCombo || (state.alt1 && state.alt1 != vkey))
         && IsHotkey(vkey)
@@ -2954,10 +2928,13 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             }
         }
     } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
-        if (g_ct_hold_active && conf.ClickThroughHoldMode && g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) {
-            // The ClickThrough shortcut was released: restore the window.
-            RestoreClickThrough();
-            g_ct_hold_active = 0;
+        if (g_ct_hotkey_vk && vkey == g_ct_hotkey_vk) {
+            g_ct_key_down = 0;
+            if (g_ct_hold_active && conf.ClickThroughHoldMode) {
+                // The ClickThrough shortcut was released: restore the window.
+                RestoreClickThrough();
+                g_ct_hold_active = 0;
+            }
         }
         if (IsHotkey(vkey)) {
             //LOGA("ALT UP");
@@ -4887,10 +4864,6 @@ static HWND FindTiledWindow(HWND hwnd, unsigned char direction)
 /////////////////////////////////////////////////////////////////////////////
 // Temporary click-through / transparency for a window.
 // Transparency percent is configured by [Advanced] ClickThroughTransparency.
-static HWND g_ct_hwnd = NULL;          // Window currently in click-through state.
-static LONG_PTR g_ct_exstyle = 0;      // Original extended style.
-static BYTE g_ct_oldalpha = 255;       // Original alpha (255 if not layered).
-static int g_ct_alpha_changed = 0;     // Did we change the alpha?
 
 // Restore the window we made click-through to its original state.
 static void RestoreClickThrough(void)
@@ -4918,18 +4891,17 @@ static void RestoreClickThrough(void)
     g_ct_alpha_changed = 0;
 }
 
-// Toggle click-through + 70% transparency on the current window.
+// Enable click-through on the current window. Does nothing if a window is
+// already click-through: only one click-through is allowed at a time.
 static void ActionClickThrough(HWND hwnd)
 {
-    // If a window is already click-through, the shortcut toggles it back to
-    // its original state. Do this before looking at the target: the current
-    // foreground window may be a popup/context menu (or even invalid) and
-    // that must not prevent restoring the real click-through window.
+    // A click-through is already active: ignore requests coming from other
+    // windows (e.g. a mouse action passed through the click-through window).
+    // An explicit shortcut press restores it instead (handled by the callers),
+    // so the user must restore it before applying click-through elsewhere.
     if (g_ct_hwnd) {
-        int was_alive = IsWindow(g_ct_hwnd);
-        RestoreClickThrough();
-        if (was_alive) return;
-        // Otherwise the window is gone; fall through and apply to the new one.
+        if (IsWindow(g_ct_hwnd)) return; // only one click-through at a time
+        RestoreClickThrough();           // the tracked window is gone; clear it
     }
 
     // Apply to the top-level window rather than a clicked child control.
@@ -6278,9 +6250,24 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 // ClickThrough hold mode: activate while the shortcut is held
                 // down; the keyboard hook restores it on release.
                 if (action.ac == AC_CLICKTHROUGH && conf.ClickThroughHoldMode && wParam > 0xC000) {
-                    // Handled by the low-level keyboard hook on key down/up to
-                    // avoid a race between WM_HOTKEY and the key release.
+                    // Hold mode: enable on press only if the key is still down.
+                    // If it was already released (very short tap), do nothing:
+                    // this queued message may be handled after the key-up.
+                    if (!g_ct_hold_active && g_ct_key_down) {
+                        g_ct_hold_active = 1;
+                        if (!g_ct_hwnd) { // only one click-through at a time
+                            HWND thw = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
+                            if (IsWindow(thw)) ActionClickThrough(thw);
+                        }
+                    }
                     return 0;
+                }
+                if (action.ac == AC_CLICKTHROUGH && g_ct_hwnd) {
+                    // Toggle mode / CLI: restore the active click-through.
+                    int alive = IsWindow(g_ct_hwnd);
+                    RestoreClickThrough();
+                    if (alive) return 0;
+                    // Stale tracked window: fall through and apply to the target.
                 }
                 // Some actions pass directly through the default blacklists...
                 HWND targethwnd = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
@@ -6677,7 +6664,7 @@ void registerAllHotkeys(const TCHAR* inipath)
             // Lobyte is the virtual key code and hibyte is the mod_key
             if (RegisterHotKey(g_mainhwnd, 0xC001 + idx, HIBYTE(HK), LOBYTE(HK))) {
                 conf.KBShortcutsList[idx] = action; // Add action to the list
-                if (action.ac == AC_CLICKTHROUGH) { g_ct_hotkey_vk = LOBYTE(HK); g_ct_hotkey_mod = HIBYTE(HK); }
+                if (action.ac == AC_CLICKTHROUGH) g_ct_hotkey_vk = LOBYTE(HK);
                 LOG("OK registering hotkey %s_%d_%d=%x, [idx=%d]", action_names[action.ac], (int)action.fl, (int)action.wp, (unsigned)HK, (int)idx);
                 idx++;
             } else {
