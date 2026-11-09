@@ -331,7 +331,7 @@ static const struct OptionListItem Advanced_uchars[] = {
     { "AeroTopMaximizes", 1 },
     { "UseCursor", 1 },
     { "MinAlpha", 32 },
-    { "ClickThroughTransparency", 50 },
+    { "ClickThroughTransparency", 80 },
     { "AlphaDelta", 64 },
     { "AlphaDeltaShift", 8 },
     { "ZoomFrac", 16 },

@@ -1410,7 +1410,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
         edit_shortcut_idx = 0;
         ReadDialogOptions(hwnd, optlst, ARR_SZ(optlst));
         SetDlgItemInt(hwnd, IDC_CT_TRANSP,
-            GetPrivateProfileInt(TEXT("Advanced"), TEXT("ClickThroughTransparency"), 50, inipath), FALSE);
+            GetPrivateProfileInt(TEXT("Advanced"), TEXT("ClickThroughTransparency"), 80, inipath), FALSE);
         // Agressive Pause
         CheckConfigHotKeys(hotkeys, hwnd, TEXT("Hotkeys"), TEXT("A4 A5"));
 
