@@ -1561,7 +1561,9 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
                     TCHAR *pp = lstrchr(p, TEXT('='));
                     if(!pp) continue; // No equal sign...
                     *pp = TEXT('\0');
-                    if (!lstrcmpi(p, TEXT("UsePtWindow")))
+                    // Skip option keys that are not actions.
+                    if (!lstrcmpi(p, TEXT("UsePtWindow"))
+                     || !lstrcmpi(p, TEXT("ClickThroughHoldMode")))
                         continue;
                     CB_AddString(control, p);
                     p = pp+1;
