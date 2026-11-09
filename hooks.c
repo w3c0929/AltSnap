@@ -2731,8 +2731,20 @@ static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
 // ClickThrough "hold" mode state.
 static UCHAR g_ct_hotkey_vk = 0;   // VK of the ClickThrough shortcut.
+static UCHAR g_ct_hotkey_mod = 0;  // Modifiers of the ClickThrough shortcut.
 static int g_ct_hold_active = 0;   // Shortcut is held; click-through is active.
 static void RestoreClickThrough(void);
+static void ActionClickThrough(HWND hwnd);
+// Return true when the currently pressed modifiers match the shortcut's.
+static int ClickThroughModsMatch(UCHAR mod)
+{
+    UCHAR cur = 0;
+    if (GetAsyncKeyState(VK_LWIN)&0x8000 || GetAsyncKeyState(VK_RWIN)&0x8000) cur |= 8;
+    if (GetAsyncKeyState(VK_MENU)&0x8000) cur |= 1;
+    if (GetAsyncKeyState(VK_CONTROL)&0x8000) cur |= 2;
+    if (GetAsyncKeyState(VK_SHIFT)&0x8000) cur |= 4;
+    return cur == mod;
+}
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
 #ifdef __cplusplus
@@ -2759,6 +2771,27 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
     if (ScrollLockState()) return CallNextHookEx(NULL, nCode, wParam, lParam);
 
     if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+        // ClickThrough hold mode: activate on the shortcut key down. Doing it
+        // here (same event stream as the key release) avoids a race with the
+        // queued WM_HOTKEY message that could leave the window stuck.
+        if (conf.ClickThroughHoldMode && g_ct_hotkey_vk && vkey == g_ct_hotkey_vk
+        && ClickThroughModsMatch(g_ct_hotkey_mod)) {
+            if (!g_ct_hold_active) {
+                HWND thw;
+                if (conf.UsePtWindow) {
+                    POINT kpt;
+                    GetCursorPos(&kpt);
+                    thw = WindowFromPoint(kpt);
+                } else {
+                    thw = GetForegroundWindow();
+                }
+                if (thw) thw = GetAncestor(thw, GA_ROOT);
+                if (IsWindow(thw)) {
+                    g_ct_hold_active = 1;
+                    ActionClickThrough(thw);
+                }
+            }
+        }
         if (!state.alt && !state.action.ac
         && (!conf.KeyCombo || (state.alt1 && state.alt1 != vkey))
         && IsHotkey(vkey)
@@ -6245,13 +6278,8 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 // ClickThrough hold mode: activate while the shortcut is held
                 // down; the keyboard hook restores it on release.
                 if (action.ac == AC_CLICKTHROUGH && conf.ClickThroughHoldMode && wParam > 0xC000) {
-                    if (!g_ct_hold_active) {
-                        HWND thw = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
-                        if (IsWindow(thw)) {
-                            g_ct_hold_active = 1;
-                            SClickActions(thw, action);
-                        }
-                    }
+                    // Handled by the low-level keyboard hook on key down/up to
+                    // avoid a race between WM_HOTKEY and the key release.
                     return 0;
                 }
                 // Some actions pass directly through the default blacklists...
@@ -6649,7 +6677,7 @@ void registerAllHotkeys(const TCHAR* inipath)
             // Lobyte is the virtual key code and hibyte is the mod_key
             if (RegisterHotKey(g_mainhwnd, 0xC001 + idx, HIBYTE(HK), LOBYTE(HK))) {
                 conf.KBShortcutsList[idx] = action; // Add action to the list
-                if (action.ac == AC_CLICKTHROUGH) g_ct_hotkey_vk = LOBYTE(HK);
+                if (action.ac == AC_CLICKTHROUGH) { g_ct_hotkey_vk = LOBYTE(HK); g_ct_hotkey_mod = HIBYTE(HK); }
                 LOG("OK registering hotkey %s_%d_%d=%x, [idx=%d]", action_names[action.ac], (int)action.fl, (int)action.wp, (unsigned)HK, (int)idx);
                 idx++;
             } else {
