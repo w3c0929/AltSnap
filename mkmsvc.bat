@@ -6,7 +6,8 @@ rc hooks.rc
 rc altsnap.rc
 
 :: you can disable some stuffs in AltSnap if needed...
-::@set DEFINES= /D "NO_VISTA" /D "NO_OLEAPI"
+@set DEFINES=/D "UNICODE" /D "_UNICODE"
+::@set DEFINES=%DEFINES% /D "NO_VISTA" /D "NO_OLEAPI"
 
 cl /c altsnap.c /nologo /Ox /Oi /Os /Gy %DEFINES%
 

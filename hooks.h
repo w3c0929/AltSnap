@@ -3,10 +3,8 @@
 
 //#define UNICODE
 //#define _UNICODE
-#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
 #define WINVER 0x0600
-#endif
 #include <windows.h>
 #include "unfuck.h"
 
@@ -16,8 +14,7 @@
 #  define tWinMain WinMain
 #endif
 
-#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600 \
-  || defined(__MINGW32__) && ( !defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 2 )
+#if defined(__MINGW32__) && ( !defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 2 )
 // Old version of MINGW64 header or MINGW32 only!
 // Unable to use endpointvolume.h !
 #define NO_OLEAPI
@@ -118,7 +115,6 @@
     ACVALUE(AC_KILL,         Kill,        CL) \
     ACVALUE(AC_PAUSE,        Pause,       CL) \
     ACVALUE(AC_RESUME,       Resume,      CL) \
-    ACVALUE(AC_REVEALEXE,    RevealExe,   ZO) \
     ACVALUE(AC_MAXHV,        MaximizeHV,  MR) \
     ACVALUE(AC_MINALL,       MinAllOther, 00) \
     ACVALUE(AC_MUTE,         Mute,        00) \
@@ -156,8 +152,7 @@
     ACVALUE(AC_ZOOM,         Zoom,         MR) \
     ACVALUE(AC_ZOOM2,        Zoom2,        MR) \
     ACVALUE(AC_NPSTACKED,    NPStacked,    ZO) \
-    ACVALUE(AC_NPSTACKED2,   NPStacked2,   ZO) \
-    ACVALUE(AC_CLICKTHROUGH, ClickThrough, 00)
+    ACVALUE(AC_NPSTACKED2,   NPStacked2,   ZO)
 
 #define ACVALUE(a, b, c) a,
 enum action { ACTION_MAP AC_MAXVALUE, AC_ORICLICK };

@@ -20,26 +20,25 @@ static struct { // NOTIFYICONDATA for NT4
     TCHAR szTip[64];
 } tray;
 
-static unsigned char tray_added = 0;
-static unsigned char tray_hidden = 0;
-static unsigned char UseZones = 0;
-static int LayoutNumber = 0;
-static int MaxLayouts = 0;
+static int tray_added = 0;
+static int hide = 0;
+static int UseZones = 0;
+static int LayoutNumber=0;
+static int MaxLayouts=0;
 
-enum { ICONS_COUNT = 3};
-static const TCHAR *tray_iconstr[] = {
+static const TCHAR *iconstr[] = {
     TEXT("TRAY_OFF"),
     TEXT("TRAY_ON"),
     TEXT("TRAY_SUS")
 };
-static const TCHAR *tray_tooltipstr[] = {
+static const TCHAR *traystr[] = {
     TEXT(APP_NAMEA)TEXT(" (Off)"),
     TEXT(APP_NAMEA)TEXT(" (On)"),
     TEXT(APP_NAMEA)TEXT("..."),
 };
-static HICON g_icons[ICONS_COUNT];
+static HICON icons[3];
 
-static void LoadAllIcons(void)
+static void LoadAllIcons()
 {
     TCHAR theme[MAX_PATH]; // Get theme name
     int ret = GetPrivateProfileString(TEXT("General"), TEXT("Theme"), TEXT(""), theme, ARR_SZ(theme), inipath);
@@ -48,35 +47,35 @@ static void LoadAllIcons(void)
         DWORD mod = GetModuleFileName(NULL, path, ARR_SZ(path));
         if (mod) {
             PathRemoveFileSpecL(path);
-            sb_t sb = { path, lstrlen(path), ARR_SZ(path) };
-            SbAppendStr(&sb, TEXT("\\Themes\\")); // Themes subfolder
-            SbAppendStr(&sb, theme); // Theme name
-            SbAppendStr(&sb, TEXT("\\"));
-            size_t base_path_len = sb.len;
-            if (base_path_len < MAX_PATH-13) { // strlen("TRAY_OFF.ICO")==12
-                for(size_t i=0; i<3; i++) {
-                    sb.len = base_path_len;
-                    SbAppendStr(&sb, tray_iconstr[i]);
-                    SbAppendStr(&sb, TEXT(".ico"));
+            lstrcat_s(path, ARR_SZ(path), TEXT("\\Themes\\")); // Themes subfolder
+            lstrcat_s(path, ARR_SZ(path), theme); // Theme name
+            int len = lstrlen(path);
+            TCHAR *p = path+len;
+            *p++ = TEXT('\\');
+            if (len < MAX_PATH-13) { // strlen("TRAY_OFF.ICO")==12
+                UCHAR i;
+                for(i=0; i<3; i++) {
+                    lstrcpy_s(p, ARR_SZ(path)-len, iconstr[i]);
+                    lstrcat_s(path, ARR_SZ(path), TEXT(".ico"));
                     HICON tmp = (HICON)LoadImage(g_hinst, path, IMAGE_ICON,0,0, LR_LOADFROMFILE|LR_DEFAULTSIZE|LR_LOADTRANSPARENT);
-                    g_icons[i] = tmp? tmp: LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
-                    //MessageBox(NULL, path, NULL, 0);
+                    icons[i] = tmp? tmp: LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
                 }
                 return;
             }
         }
     }
     // Fallback to internal icons.
-    for (size_t i = 0; i < ICONS_COUNT; i++)
-        g_icons[i] = LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
+    UCHAR i;
+    for (i=0; i<3; i++)
+        icons[i] = LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
 }
 
 /////////////////////////////////////////////////////////////////////////////
-static int InitTray(void)
+static int InitTray()
 {
     ScrollLockState = GetPrivateProfileInt(TEXT("Input"), TEXT("ScrollLockState"), 0, inipath);
-    LayoutNumber    = (int)GetPrivateProfileInt(TEXT("Zones"), TEXT("LayoutNumber"), 0, inipath);
-    MaxLayouts      = (int)GetPrivateProfileInt(TEXT("Zones"), TEXT("MaxLayouts"), 0, inipath);
+    LayoutNumber    = GetPrivateProfileInt(TEXT("Zones"), TEXT("LayoutNumber"), 0, inipath);
+    MaxLayouts      = GetPrivateProfileInt(TEXT("Zones"), TEXT("MaxLayouts"), 0, inipath);
     MaxLayouts = CLAMP(0, MaxLayouts, 10);
     LayoutNumber = CLAMP(0, LayoutNumber, max(0,MaxLayouts-1));
 
@@ -96,7 +95,7 @@ static int InitTray(void)
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
-static int UpdateTray(void)
+static int UpdateTray()
 {
     int Index = !!ENABLED();
     if (Index) {
@@ -106,11 +105,11 @@ static int UpdateTray(void)
             Index=2;
     }
     // Load info tool tip and tray icon
-    lstrcpy_s(tray.szTip, ARR_SZ(tray.szTip), tray_tooltipstr[Index]);
-    tray.hIcon = g_icons[Index];
+    lstrcpy_s(tray.szTip, ARR_SZ(tray.szTip), traystr[Index]);
+    tray.hIcon = icons[Index];
 
     // Only add or modify if not hidden or if balloon will be displayed
-    if (!tray_hidden || tray.uFlags&NIF_INFO) {
+    if (!hide || tray.uFlags&NIF_INFO) {
         // Try a few times, sleep 100 ms between each attempt
         int i=1;
         LOG("Updating tray icon");
@@ -139,9 +138,8 @@ static int UpdateTray(void)
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
-static int RemoveTray(void)
+static int RemoveTray()
 {
-    LOG("RemoveTray() tray_added=%d", (int)tray_added);
     if (!tray_added)
         return 1;
 
@@ -155,7 +153,7 @@ static int RemoveTray(void)
 
 /////////////////////////////////////////////////////////////////////////////
 // Zones functions
-static void WriteCurrentLayoutNumber(void)
+static void WriteCurrentLayoutNumber()
 {
     if (MaxLayouts) {
         TCHAR txt[UINT_DIGITS+1];
@@ -165,9 +163,10 @@ static void WriteCurrentLayoutNumber(void)
 static TCHAR *RectToStr(const RECT *rc, TCHAR rectstr[AT_LEAST INT_DIGITS*4+4+1])
 {
     TCHAR txt[INT_DIGITS+1];
+    int i;
     const long *RC = (const long *)rc;
     rectstr[0] = '\0';
-    for (size_t i = 0; i < 4; i++) {
+    for(i = 0; i < 4; i++) {
         lstrcat_s(rectstr, 64, Int2lStr(txt, (int)RC[i]));
         lstrcat_s(rectstr, 64, TEXT(","));
     }
@@ -179,7 +178,7 @@ static void SaveZone(const RECT *rc, unsigned num)
     TCHAR txt[64], name[32];
     WritePrivateProfileString(TEXT("Zones"), ZidxToZonestr(LayoutNumber, num, name), RectToStr(rc, txt), inipath);
 }
-static void ClearAllZones(void)
+static void ClearAllZones()
 {
     int i;
     TCHAR txt[128], name[32];
@@ -211,7 +210,7 @@ BOOL CALLBACK SaveTestWindow(HWND hwnd, LPARAM lParam)
     return TRUE;
 }
 
-static void SaveCurrentLayout(void)
+static void SaveCurrentLayout()
 {
     ClearAllZones();
     SaveTestWindow(NULL, 1);
@@ -228,30 +227,33 @@ BOOL CALLBACK CloseTestWindowCB(HWND hwnd, LPARAM lParam)
     return TRUE;
 }
 
-static void CloseAllTestWindows(void)
+static void CloseAllTestWindows()
 {
     EnumThreadWindows(GetCurrentThreadId(), CloseTestWindowCB, 0);
 }
 
-static void catFullLayoutName(sb_t *sb, int laynum)
+static void catFullLayoutName(TCHAR *txt, size_t len, int laynum)
 {
-    SbAppendStr(sb, l10n->MenuSnapLayout);
-    SbAppendUint(sb, laynum + 1);
-    if (G_HooksWinPorc) {
+    TCHAR n1[UINT_DIGITS+1];
+    lstrcat_s(txt, len, l10n->MenuSnapLayout);
+    lstrcat_s(txt, len, Uint2lStr(n1, laynum+1));
+    if (G_HotKeyProc) {
         DWORD rez =0;
-        if ((rez = G_HooksWinPorc(g_hwnd, WM_GETLAYOUTREZ, laynum, 0))) {
+        if ((rez = G_HotKeyProc(g_hwnd, WM_GETLAYOUTREZ, laynum, 0))) {
+            // TCHAR n2[UINT_DIGITS+1];
             // Add (width:height) to label the layout.
-            SbAppendStr(sb, TEXT("  ("));
-            SbAppendUint(sb, LOWORD(rez));
-            SbAppendStr(sb, TEXT(":"));
-            SbAppendUint(sb, HIWORD(rez));
-            SbAppendStr(sb, TEXT(")"));
+            // lstrcatM_s(txt, len ,TEXT("  ("), Uint2lStr(n1, LOWORD(rez)),TEXT(":"),Uint2lStr(n2, HIWORD(rez)), TEXT(")"), NULL);
+            lstrcat_s(txt, len, TEXT("  ("));
+            lstrcat_s(txt, len, Uint2lStr(n1, LOWORD(rez)));
+            lstrcat_s(txt, len, TEXT(":"));
+            lstrcat_s(txt, len, Uint2lStr(n1, HIWORD(rez)));
+            lstrcat_s(txt, len, TEXT(")"));
         } else {
-            SbAppendStr(sb, TEXT("  "));
-            SbAppendStr(sb, l10n->MenuEmptyZone); // (empty)
+            lstrcat_s(txt, len, TEXT("  "));
+            lstrcat_s(txt, len, l10n->MenuEmptyZone); // (empty)
         }
     } else {
-        SbAppendStr(sb, TEXT("  (...)"));
+        lstrcat_s(txt, len, TEXT("  (...)"));
     }
 }
 
@@ -264,7 +266,7 @@ static void ShowContextMenu(HWND hwnd)
 
     AppendMenu(menu, MF_STRING, CMD_TOGGLE, (ENABLED()?l10n->MenuDisable:l10n->MenuEnable));
     AppendMenu(menu, MF_STRING, CMD_HIDE, l10n->MenuHideTray);
-    if(WinVer >= VISTA) // Vista+
+    if(WinVer >= 6) // Vista+
         InsertMenu(menu, -1, elevated?MF_BYPOSITION|MF_GRAYED:MF_BYPOSITION
                  , CMD_ELEVATE, (elevated? l10n->GeneralElevated: l10n->GeneralElevate));
 
@@ -277,25 +279,24 @@ static void ShowContextMenu(HWND hwnd)
         if(MaxLayouts)
             AppendMenu(menu, MF_SEPARATOR, 0, NULL);
         int i;
-        TCHAR txt_buf[128]; txt_buf[0] = TEXT('\0');
-        sb_t sb = { txt_buf, 0, ARR_SZ(txt_buf) };
+        TCHAR txt[128];
         for (i=0; i < MaxLayouts; i++) {
-            sb.len = 0;
-            catFullLayoutName(&sb, i);
+            txt[0] = '\0';
+            catFullLayoutName(txt, ARR_SZ(txt), i);
             // Check the current layout We use a simple checkmark,
             // because a radio button is more complex to setup.
             UINT mfflags = i==LayoutNumber? MF_STRING|MF_CHECKED: MF_STRING|MF_UNCHECKED;
-            AppendMenu(menu, mfflags, CMD_SNAPLAYOUT+i, sb.it);
+            AppendMenu(menu, mfflags, CMD_SNAPLAYOUT+i, txt);
         }
 
         if (!(UseZones&2)) {
-            sb.len = 0;
-            SbAppendStr(&sb, l10n->MenuEditLayout);
-            SbAppendStr(&sb, TEXT(" "));
-            SbAppendUint(&sb, LayoutNumber + 1);
+            TCHAR numstr[INT_DIGITS+1];
+            lstrcpy_s(txt, ARR_SZ(txt), l10n->MenuEditLayout);
+            lstrcat_s(txt, ARR_SZ(txt), TEXT(" "));
+            lstrcat_s(txt, ARR_SZ(txt), Int2lStr(numstr, LayoutNumber+1));
             AppendMenu(menu, MF_SEPARATOR, 0, NULL);
             AppendMenu(menu, MF_STRING, CMD_TESTWIN,  l10n->AdvancedTestWindow);
-            AppendMenu(menu, MF_STRING, CMD_EDITLAYOUT, sb.it);
+            AppendMenu(menu, MF_STRING, CMD_EDITLAYOUT, txt);
             AppendMenu(menu, FindWindow(TEXT(APP_NAMEA)TEXT("-test"), NULL)? MF_STRING :MF_STRING|MF_GRAYED
                       , CMD_SAVEZONES, l10n->MenuSaveZones);
 

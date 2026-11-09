@@ -45,8 +45,8 @@ static struct wnddata wnddb[NUMWNDDB];
 /////////////////////////////////////////////////////////////////////////////
 // Database functions: used as fallback if SetProp fails
 
-// Zero-out the database to be called in Load(void)
-static void ResetDB(void)
+// Zero-out the database to be called in Load()
+static void ResetDB()
 {
     int i;
     for (i=0; i < NUMWNDDB; i++) {

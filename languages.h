@@ -18,7 +18,7 @@
 #define L10NIDX(entryname) (short)( offsetof(struct strings, entryname)/sizeof(TCHAR**) )
 
 // Resolve entry name from index.
-#define L10NSTR(i) ( ((const TCHAR*const*)l10n)[i] )
+#define L10NSTR(i) ( ((const TCHAR*const*const)l10n)[i] )
 
 struct langinfoitem {
   TCHAR code[8];
@@ -122,7 +122,6 @@ struct langinfoitem {
   LNGVALUE(InputActionKill,      TEXT("&Kill program"), NULL) \
   LNGVALUE(InputActionPause,     TEXT("Pause program"), NULL) \
   LNGVALUE(InputActionResume,    TEXT("Resume program"), NULL) \
-  LNGVALUE(InputActionRevealExe, TEXT("Show program &in Explorer"), NULL) \
   LNGVALUE(InputActionASOnOff,   TEXT("S&uspend/Resume AltSnap"), NULL) \
   LNGVALUE(InputActionMoveOnOff, TEXT("Movement dis&abled"), NULL) \
   LNGVALUE(InputActionMinimize,  TEXT("Mi&nimize window"), NULL) \
@@ -160,7 +159,6 @@ struct langinfoitem {
   LNGVALUE(InputActionMoveTNEdge,   TEXT("Move to next edge"), NULL) \
   LNGVALUE(InputActionMinAllOther,  TEXT("Minimize &other windows"), NULL) \
   LNGVALUE(InputActionTransparency, TEXT("Transparency"), NULL) \
-  LNGVALUE(InputActionClickThrough, TEXT("Toggle click-t&hrough (70% transparent)"), NULL) \
   LNGVALUE(InputActionZoom,         TEXT("Zoom window"), NULL) \
   LNGVALUE(InputActionZoom2,        TEXT("Zoom window 2"), NULL) \
   LNGVALUE(InputActionHScroll,      TEXT("Horizontal scroll"), NULL) \
@@ -224,13 +222,13 @@ struct langinfoitem {
   LNGVALUE(AdvancedTopmostIndicator, TEXT("Show an i&ndicator on always on top windows"), NULL) \
   /* About Tab */ \
   LNGVALUE(AboutBox,     TEXT("About ") APP_NAME , NULL) \
-  LNGVALUE(AboutVersion, TEXT("Version"), NULL) \
+  LNGVALUE(AboutVersion, TEXT("Version ") TEXT( APP_VERSION ), NULL) \
   LNGVALUE(AboutAuthor,  TEXT("Created by Stefan Sundin"), NULL) \
   LNGVALUE(AboutAuthor2, TEXT("Maintained by Raymond Gillibert"), NULL) \
   LNGVALUE(AboutLicense, APP_NAME TEXT(" is free and open source software!\nFeel free to redistribute!"), NULL) \
   LNGVALUE(AboutTranslationCredit, TEXT("Translation credit"), NULL) \
   /* Misc */ \
-  LNGVALUE(MiscUnhookError,      TEXT("There was an error disabling AltSnap. This was most likely caused by Windows having already disabled AltSnap's hooks.\n\nIf this is the first time this has happened, you can safely ignore it and continue using AltSnap.\n\nIf this is happening repeatedly, you can read on the website how to prevent this from happening again (look for 'AltDrag mysteriously stops working' in the documentation)."), NULL) \
+  LNGVALUE(MiscUnhookError,      TEXT("There was an error disabling AltDrag. This was most likely caused by Windows having already disabled AltDrag's hooks.\n\nIf this is the first time this has happened, you can safely ignore it and continue using AltDrag.\n\nIf this is happening repeatedly, you can read on the website how to prevent this from happening again (look for 'AltDrag mysteriously stops working' in the documentation)."), NULL) \
   LNGVALUE(MiscZoneConfirmation, TEXT("Erase old snap layout and save current Test Windows positions as the new snap layout?"), NULL) \
   LNGVALUE(MiscZoneTestWinHelp,  TEXT("To setup Snap layout:\n1) Open several of those Test Windows\n2) Dispose them as you please\n3) Hit the *&Save test windows as snap layout* option in the tray menu"), NULL) \
   /* Basic Verbs */ \
@@ -272,7 +270,7 @@ struct langinfoitem {
   LNGVALUE(z, TEXT("ž%źẑżẓẕ%ƶʒƹƺǯȥ|Ȥɀ|Ɀⱬ|Ⱬⓩ"), NULL)
 
 
-#define LNGVALUE(x, y, z) const TCHAR *x, *x##_T_T_;
+#define LNGVALUE(x, y, z) TCHAR *x, *x##_T_T_;
 // String structure definition TCHAR *translation, *tooltip;
 struct strings { LANGUAGE_MAP };
 #undef LNGVALUE

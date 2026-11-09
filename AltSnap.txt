@@ -1,7 +1,7 @@
 *=========================================================================*
 *            ALTSNAP for Windows NT4/2000/XP/Vista/7/8.x/10/11            *
 *  Modified by Raymond Gillibert from original AltDrag by Stefan Sundin   *
-*                     release 1.67 (November 15, 2025)                    *
+*                       release 1.68 (July 4, 2026)                       *
 *-------------------------------------------------------------------------*
 * Download MEGA: https://mega.nz/folder/mW5ExCCT#gI8DQICICk-y4FIjxaqtGg   *
 * Download GitHub: https://github.com/RamonUnch/AltSnap/releases/         *
@@ -183,6 +183,44 @@ Note that this version has some more feature.
 
 ===========================================================================
 == CHANGELOG ==
+
+== AltSnap 1.68 ==
+
+ + Allow to have **parameters for an action** #718, #749, For the mouse
+   buttons it usually will not affect anyone. However for Keyboard shortcuts
+   it changes completely the way they are configured. Fixes #711.
+   You will have to click on the [+] button next to the keyboard shortcut
+   drop list and configure the advanced action.
+   This ie: `Step_U_32`, to Step Up windows by 32 pixels.
+   Action parameters are separated by underscore.
+   It also applies to the command line options:
+   ie: `AltSnap.exe -apTransparency_S_128`
+   will set the Transparency of the currently focused window to 128.
+
+  To see the list of possible parameters, look at the advanced configuration
+  box for the keyboard shortcuts. Those advanced actions can also be used as
+  Mouse actions but you have to write them manually in the proper format.
+
+ * Unify Movement logic, #732, to prepare for #723.
+
+ * Send WM_SIZING during resize for grid-snapping apps by @andrewachen. #723
+
+ * Add `DragOutThresholdPx` in the `[Advanced]` section of the ini file. #737
+   Default is 20 pixels. The reason the option was added is because
+   Windows 11 returns random erroneous values when querying
+   the `SPI_GETMOUSEDRAGOUTTHRESHOLD` value.
+
+ * Proper per-monitor WindowListMenu dpi awareness. #748. Fixes #747
+
+ * Updated German translation by @Ichisich
+
+ * Updated Ukrainian translation by @acid-jack
+
+ * Updated French and Italian Translations.
+
+ * Updated Polish translation by @xeophyte
+ 
+ * Updated Japanese translation by @coolvitto
 
 == AltSnap 1.67 ==
 

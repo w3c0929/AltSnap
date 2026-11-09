@@ -10,7 +10,8 @@ CFLAGS= -nostdlib -Os -g -DLOG_STUFF=1 -m64 -march=x86-64 -mtune=generic \
     -lmsvcrt -lkernel32 -luser32 -lgdi32 -fgcse-sm -fgcse-las -fno-plt \
     -Wl,-dynamicbase,-nxcompat,--no-seh,--relax,--disable-runtime-pseudo-reloc,--enable-auto-import,--disable-stdcall-fixup \
 	-D__USE_MINGW_ANSI_STDIO=0 -fshort-enums\
-    $(INCLUDE) $(WARNINGS) -fno-exceptions -fno-dwarf2-cfi-asm -fno-asynchronous-unwind-tables
+    $(INCLUDE) $(WARNINGS) -fno-exceptions -fno-dwarf2-cfi-asm -fno-asynchronous-unwind-tables \
+    -municode -DUNICODE -D_UNICODE
 
 default: AltSnap.exe hooks.dll
 
@@ -23,7 +24,7 @@ AltSnap.exe : altsnapr.o altsnap.c hooks.h tray.c config.c languages.h languages
 altsnapr.o : altsnap.rc window.rc resource.h AltSnap.exe.manifest media/find.cur media/find.ico media/icon.ico media/tray-disabled.ico media/tray-enabled.ico
 	windres altsnap.rc altsnapr.o
 
-hooksr.o: hooks.rc
+hooksr.o: hooks.rc resource.h
 	windres hooks.rc hooksr.o
 
 clean :
