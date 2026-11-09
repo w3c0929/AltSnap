@@ -2738,6 +2738,22 @@ static HWND g_ct_hwnd = NULL;      // Window currently in click-through state.
 static LONG_PTR g_ct_exstyle = 0;  // Original extended style.
 static BYTE g_ct_oldalpha = 255;   // Original alpha (255 if not layered).
 static int g_ct_alpha_changed = 0; // Did we change the alpha?
+static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persistence.
+static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
+// Parse a hexadecimal pointer value.
+static ULONG_PTR CtHex2Ptr(const TCHAR *s)
+{
+    ULONG_PTR v = 0;
+    for (; *s; ++s) {
+        TCHAR c = *s; int d;
+        if (c >= TEXT('0') && c <= TEXT('9')) d = c - TEXT('0');
+        else if (c >= TEXT('A') && c <= TEXT('F')) d = c - TEXT('A') + 10;
+        else if (c >= TEXT('a') && c <= TEXT('f')) d = c - TEXT('a') + 10;
+        else break;
+        v = (v << 4) | (ULONG_PTR)d;
+    }
+    return v;
+}
 static void RestoreClickThrough(void);
 static void ActionClickThrough(HWND hwnd);
 ///////////////////////////////////////////////////////////////////////////
@@ -4874,6 +4890,77 @@ static HWND FindTiledWindow(HWND hwnd, unsigned char direction)
 // Temporary click-through / transparency for a window.
 // Transparency percent is configured by [Advanced] ClickThroughTransparency.
 
+// Crash-recovery persistence: remember the target window and its original
+// style so a restart can undo a click-through left by a crash or a forced kill.
+static void ClearClickThroughState(void)
+{
+    if (!g_ct_inipath[0]) return;
+    WritePrivateProfileString(TEXT("ClickThrough"), NULL, NULL, g_ct_inipath);
+}
+
+static void SaveClickThroughState(void)
+{
+    if (!g_ct_inipath[0] || !g_ct_hwnd) return;
+    TCHAR hex[LPTR_HDIGITS+1], nb[UINT_DIGITS+1], cls[64];
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("Hwnd"),
+        LPTR2Hex(hex, (ULONG_PTR)g_ct_hwnd), g_ct_inipath);
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("ExStyle"),
+        LPTR2Hex(hex, (ULONG_PTR)g_ct_exstyle), g_ct_inipath);
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("OldAlpha"),
+        Uint2lStr(nb, g_ct_oldalpha), g_ct_inipath);
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("AlphaChanged"),
+        g_ct_alpha_changed ? TEXT("1") : TEXT("0"), g_ct_inipath);
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("AppliedAlpha"),
+        Uint2lStr(nb, g_ct_applied_alpha), g_ct_inipath);
+    cls[0] = TEXT('\0');
+    GetClassName(g_ct_hwnd, cls, ARR_SZ(cls));
+    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("Class"), cls, g_ct_inipath);
+}
+
+// Undo a click-through left over from a previous (crashed) session, then clear
+// the saved state. Only touches the window if it still looks like our leftover.
+static void RecoverClickThrough(void)
+{
+    if (!g_ct_inipath[0]) return;
+    TCHAR hex[LPTR_HDIGITS+2], scls[64];
+    GetPrivateProfileString(TEXT("ClickThrough"), TEXT("Hwnd"), TEXT(""), hex, ARR_SZ(hex), g_ct_inipath);
+    if (!hex[0]) return;
+
+    HWND hwnd = (HWND)CtHex2Ptr(hex);
+    int ok = 0;
+    if (hwnd && IsWindow(hwnd)) {
+        TCHAR cls[64]; cls[0] = TEXT('\0');
+        GetClassName(hwnd, cls, ARR_SZ(cls));
+        scls[0] = TEXT('\0');
+        GetPrivateProfileString(TEXT("ClickThrough"), TEXT("Class"), TEXT(""), scls, ARR_SZ(scls), g_ct_inipath);
+        if (!lstrcmpi(cls, scls)) ok = 1;
+    }
+    if (ok) {
+        LONG_PTR ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        int layered = (ex & WS_EX_LAYERED) != 0;
+        BYTE a = 255;
+        if (layered) GetLayeredWindowAttributes(hwnd, NULL, &a, NULL);
+        BYTE applied = (BYTE)GetPrivateProfileInt(TEXT("ClickThrough"), TEXT("AppliedAlpha"), 0, g_ct_inipath);
+        int achanged = GetPrivateProfileInt(TEXT("ClickThrough"), TEXT("AlphaChanged"), 0, g_ct_inipath);
+        int ours = (ex & WS_EX_TRANSPARENT)
+                || (achanged && layered && applied && a == applied);
+        if (ours) {
+            GetPrivateProfileString(TEXT("ClickThrough"), TEXT("ExStyle"), TEXT(""), hex, ARR_SZ(hex), g_ct_inipath);
+            LONG_PTR orig = (LONG_PTR)CtHex2Ptr(hex);
+            BYTE olda = (BYTE)GetPrivateProfileInt(TEXT("ClickThrough"), TEXT("OldAlpha"), 255, g_ct_inipath);
+            LONG_PTR newex = ex & ~(LONG_PTR)WS_EX_TRANSPARENT;
+            if (orig & WS_EX_LAYERED) newex |= WS_EX_LAYERED;
+            else newex &= ~(LONG_PTR)WS_EX_LAYERED;
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, newex);
+            if (achanged && (orig & WS_EX_LAYERED))
+                SetLayeredWindowAttributes(hwnd, 0, olda, LWA_ALPHA);
+            SetWindowPos(hwnd, (orig & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST,
+                         0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        }
+    }
+    ClearClickThroughState();
+}
+
 // Restore the window we made click-through to its original state.
 static void RestoreClickThrough(void)
 {
@@ -4898,6 +4985,8 @@ static void RestoreClickThrough(void)
     SetWindowPos(hwnd, (g_ct_exstyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST,
                  0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     g_ct_alpha_changed = 0;
+    g_ct_applied_alpha = 0;
+    ClearClickThroughState();
 }
 
 // Enable click-through on the current window. Does nothing if a window is
@@ -4937,16 +5026,20 @@ static void ActionClickThrough(HWND hwnd)
     if (newstyle != exstyle)
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, newstyle);
 
-    // Only lower the opacity when the window is not already transparent.
-    if (!already_transparent) {
+    {
         int transp = conf.ClickThroughTransparency;
         if (transp > 100) transp = 100;
         BYTE ct_alpha = (BYTE)((255 * (100 - transp) + 50) / 100);
-        SetLayeredWindowAttributes(hwnd, 0, ct_alpha, LWA_ALPHA);
+        g_ct_applied_alpha = already_transparent ? 0 : ct_alpha;
+        // Only lower the opacity when the window is not already transparent.
+        if (!already_transparent)
+            SetLayeredWindowAttributes(hwnd, 0, ct_alpha, LWA_ALPHA);
     }
 
     // Keep the click-through window on top of the other windows.
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+
+    SaveClickThroughState();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -6668,7 +6761,7 @@ void registerAllHotkeys(const TCHAR* inipath)
     GetPrivateProfileSection(TEXT("KBShortcuts"), inisection, ARR_SZ(inisection), inipath);
 
     conf.UsePtWindow = GetSectionOptionInt(inisection, "UsePtWindow", 0);
-    conf.ClickThroughHoldMode = GetSectionOptionInt(inisection, "ClickThroughHoldMode", 1);
+    conf.ClickThroughHoldMode = GetSectionOptionInt(inisection, "ClickThroughHoldMode", 0);
 
     #define ACVALUE(a, b, c) (#b),
     static const char *action_names[] = { ACTION_MAP };
@@ -6749,6 +6842,7 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
 #if defined(_MSC_VER) && _MSC_VER > 1300
 #pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
 #endif
+    lstrcpy_s(g_ct_inipath, ARR_SZ(g_ct_inipath), inipath);
     // Reset stuff...
     mem00(&state, sizeof(state));
     mem00(&LastWin, sizeof(LastWin));
@@ -6906,6 +7000,9 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
                        || conf.LongClickMove); // Move with long click
     // Capture main hwnd from caller. This is also the cursor wnd
     g_mainhwnd = mainhwnd;
+
+    // Undo a click-through left over by a previous (crashed) session.
+    RecoverClickThrough();
 
     // read and register all shortcuts related options.
     registerAllHotkeys(inipath);
