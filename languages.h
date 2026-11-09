@@ -160,6 +160,7 @@ struct langinfoitem {
   LNGVALUE(InputActionMoveTNEdge,   TEXT("Move to next edge"), NULL) \
   LNGVALUE(InputActionMinAllOther,  TEXT("Minimize &other windows"), NULL) \
   LNGVALUE(InputActionTransparency, TEXT("Transparency"), NULL) \
+  LNGVALUE(InputActionClickThrough, TEXT("Toggle click-t&hrough (70% transparent)"), NULL) \
   LNGVALUE(InputActionZoom,         TEXT("Zoom window"), NULL) \
   LNGVALUE(InputActionZoom2,        TEXT("Zoom window 2"), NULL) \
   LNGVALUE(InputActionHScroll,      TEXT("Horizontal scroll"), NULL) \

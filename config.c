@@ -1370,6 +1370,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
         {TEXT("Lower"),       L10NIDX(InputActionLower) },
         {TEXT("Roll"),        L10NIDX(InputActionRoll), ACPARAM_UPDOWN },
         {TEXT("Transparency"),L10NIDX(InputActionTransparency), ACPARAM_UPDOWNSETTOGGLE, ACPARAM_NUMBER },
+        {TEXT("ClickThrough"),L10NIDX(InputActionClickThrough) },
         {TEXT("AlwaysOnTop"), L10NIDX(InputActionAlwaysOnTop) },
         {TEXT("Borderless"),  L10NIDX(InputActionBorderless) },
         {TEXT("Center"),      L10NIDX(InputActionCenter) },

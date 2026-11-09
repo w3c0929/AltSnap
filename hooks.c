@@ -4896,6 +4896,78 @@ static HWND FindTiledWindow(HWND hwnd, unsigned char direction)
 }
 
 /////////////////////////////////////////////////////////////////////////////
+// Temporary click-through / transparency for a window.
+// 70% transparency => ~30% opacity.
+#define CLICKTHROUGH_ALPHA ((BYTE)77)
+static HWND g_ct_hwnd = NULL;          // Window currently in click-through state.
+static LONG_PTR g_ct_exstyle = 0;      // Original extended style.
+static BYTE g_ct_oldalpha = 255;       // Original alpha (255 if not layered).
+static int g_ct_alpha_changed = 0;     // Did we change the alpha?
+
+// Restore the window we made click-through to its original state.
+static void RestoreClickThrough(void)
+{
+    HWND hwnd = g_ct_hwnd;
+    g_ct_hwnd = NULL;
+    if (!IsWindow(hwnd)) return;
+
+    LONG_PTR exstyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+    exstyle &= ~(LONG_PTR)WS_EX_TRANSPARENT;
+    // Restore WS_EX_LAYERED to its original state.
+    if (g_ct_exstyle & WS_EX_LAYERED)
+        exstyle |= WS_EX_LAYERED;
+    else
+        exstyle &= ~(LONG_PTR)WS_EX_LAYERED;
+    SetWindowLongPtr(hwnd, GWL_EXSTYLE, exstyle);
+
+    // Restore the original opacity if we were the one changing it.
+    if (g_ct_alpha_changed && (g_ct_exstyle & WS_EX_LAYERED))
+        SetLayeredWindowAttributes(hwnd, 0, g_ct_oldalpha, LWA_ALPHA);
+    g_ct_alpha_changed = 0;
+}
+
+// Toggle click-through + 70% transparency on the current window.
+static void ActionClickThrough(HWND hwnd)
+{
+    // Apply to the top-level window rather than a clicked child control.
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    if (root) hwnd = root;
+    if (!IsWindow(hwnd)) return;
+
+    // If a window is already click-through, the shortcut toggles it back
+    // to its original state (whatever the current foreground window is).
+    if (g_ct_hwnd) {
+        int was_alive = IsWindow(g_ct_hwnd);
+        RestoreClickThrough();
+        if (was_alive) return;
+        // Otherwise the window is gone; fall through and apply to the new one.
+    }
+
+    LONG_PTR exstyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+
+    BYTE alpha = 255;
+    int have_alpha = 0;
+    if (exstyle & WS_EX_LAYERED)
+        have_alpha = GetLayeredWindowAttributes(hwnd, NULL, &alpha, NULL);
+
+    // Considered already transparent only if layered with alpha < 255.
+    int already_transparent = have_alpha && alpha != 255;
+
+    g_ct_hwnd = hwnd;
+    g_ct_exstyle = exstyle;
+    g_ct_oldalpha = have_alpha ? alpha : 255;
+    g_ct_alpha_changed = !already_transparent;
+
+    LONG_PTR newstyle = exstyle | WS_EX_LAYERED | WS_EX_TRANSPARENT;
+    if (newstyle != exstyle)
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, newstyle);
+
+    // Only lower the opacity when the window is not already transparent.
+    if (!already_transparent)
+        SetLayeredWindowAttributes(hwnd, 0, CLICKTHROUGH_ALPHA, LWA_ALPHA);
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // Single click commands
 static void SClickActions(HWND hwnd, action_t action)
 {
@@ -4915,6 +4987,7 @@ static void SClickActions(HWND hwnd, action_t action)
     case AC_ALWAYSONTOP: TogglesAlwaysOnTop(hwnd); break;
     case AC_CLOSE:       PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0); break;
     case AC_TRANSPARENCY:ActionTransparency2(hwnd, action); break;
+    case AC_CLICKTHROUGH:ActionClickThrough(hwnd); break;
     case AC_LOWER:       ActionLower(hwnd, 0, state.shift, IsCtrlDown()); break;
     case AC_FOCUS:
         if      (action.fl == 0) { ActionLower(hwnd, +120, state.shift, 1); }
@@ -6208,7 +6281,7 @@ LRESULT CALLBACK HooksWinPorc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (action.ac > AC_RESIZE) { // Exclude resize action in case...
             POINT pt;
             GetMsgPT(&pt);
-            static const enum action noinitactions[] = { AC_KILL, AC_PAUSE, AC_RESUME, AC_ASONOFF, AC_NONE };
+            static const enum action noinitactions[] = { AC_KILL, AC_PAUSE, AC_RESUME, AC_ASONOFF, AC_CLICKTHROUGH, AC_NONE };
             if (IsActionInList((enum action)action.ac, noinitactions)) {
                 // Some actions pass directly through the default blacklists...
                 HWND targethwnd = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
@@ -6310,6 +6383,7 @@ __declspec(dllexport) void WINAPI Unload(void)
     if (mousehook) { UnhookWindowsHookEx(mousehook); mousehook = NULL; }
     KillAllTimers();
     KillAltSnapMenu();
+    RestoreClickThrough(); // Undo any pending click-through state.
     if (conf.TransWinOpacity) {
         DestroyWindow(g_transhwnd[0]);
         g_transhwnd[0] = NULL;
