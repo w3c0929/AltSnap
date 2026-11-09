@@ -219,6 +219,7 @@ static struct config {
     UCHAR AeroTopMaximizes;
     UCHAR UseCursor;
     UCHAR MinAlpha;
+    UCHAR ClickThroughTransparency;
     char AlphaDelta;
     char AlphaDeltaShift;
     UCHAR ZoomFrac;
@@ -329,6 +330,7 @@ static const struct OptionListItem Advanced_uchars[] = {
     { "AeroTopMaximizes", 1 },
     { "UseCursor", 1 },
     { "MinAlpha", 32 },
+    { "ClickThroughTransparency", 50 },
     { "AlphaDelta", 64 },
     { "AlphaDeltaShift", 8 },
     { "ZoomFrac", 16 },
@@ -4841,8 +4843,7 @@ static HWND FindTiledWindow(HWND hwnd, unsigned char direction)
 
 /////////////////////////////////////////////////////////////////////////////
 // Temporary click-through / transparency for a window.
-// 70% transparency => ~30% opacity.
-#define CLICKTHROUGH_ALPHA ((BYTE)77)
+// Transparency percent is configured by [Advanced] ClickThroughTransparency.
 static HWND g_ct_hwnd = NULL;          // Window currently in click-through state.
 static LONG_PTR g_ct_exstyle = 0;      // Original extended style.
 static BYTE g_ct_oldalpha = 255;       // Original alpha (255 if not layered).
@@ -4911,8 +4912,12 @@ static void ActionClickThrough(HWND hwnd)
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, newstyle);
 
     // Only lower the opacity when the window is not already transparent.
-    if (!already_transparent)
-        SetLayeredWindowAttributes(hwnd, 0, CLICKTHROUGH_ALPHA, LWA_ALPHA);
+    if (!already_transparent) {
+        int transp = conf.ClickThroughTransparency;
+        if (transp > 100) transp = 100;
+        BYTE ct_alpha = (BYTE)((255 * (100 - transp) + 50) / 100);
+        SetLayeredWindowAttributes(hwnd, 0, ct_alpha, LWA_ALPHA);
+    }
 
     // Keep the click-through window on top of the other windows.
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);

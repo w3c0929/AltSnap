@@ -870,6 +870,7 @@ static INT_PTR CALLBACK MousePageDialogProc(HWND hwnd, UINT msg, WPARAM wParam, 
         {TEXT("Roll"),        L10NIDX(InputActionRoll) },  \
         {TEXT("AlwaysOnTop"), L10NIDX(InputActionAlwaysOnTop) }, \
         {TEXT("Borderless"),  L10NIDX(InputActionBorderless) }, \
+        {TEXT("ClickThrough"),L10NIDX(InputActionClickThrough) }, \
         {TEXT("Center"),      L10NIDX(InputActionCenter) }, \
         {TEXT("Center2"),     L10NIDX(InputActionCenter2) }, \
         {TEXT("MaximizeHV"),  L10NIDX(InputActionMaximizeHV) }, \
@@ -1329,6 +1330,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
         {TEXT("Center2"),     L10NIDX(InputActionCenter2) },
         {TEXT("MaximizeHV"),  L10NIDX(InputActionMaximizeHV) },
         {TEXT("MinAllOther"), L10NIDX(InputActionMinAllOther) },
+        {TEXT("ClickThrough"),L10NIDX(InputActionClickThrough) },
         {TEXT("Menu"),        L10NIDX(InputActionMenu) },
         {TEXT("Nothing"),     L10NIDX(InputActionNothing) },
         {NULL, 0}
