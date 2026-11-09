@@ -180,6 +180,7 @@ struct langinfoitem {
   LNGVALUE(InputHotkeysShortcutsClear, TEXT("Clear ke&ys"), NULL) \
   LNGVALUE(InputHotkeysShortcutsSet,   TEXT("Sa&ve"), NULL) \
   LNGVALUE(InputHotkeysUsePtWindow,    TEXT("Apply to the &pointed window"), NULL) \
+  LNGVALUE(InputClickThroughTransparency, TEXT("Click-through transparency:"), NULL) \
   LNGVALUE(InputHotkeysLeftAlt,        TEXT("L&eft Alt"), NULL) \
   LNGVALUE(InputHotkeysRightAlt,       TEXT("&Right Alt"), NULL) \
   LNGVALUE(InputHotkeysLeftWinkey,     TEXT("Left &Winkey"), NULL) \

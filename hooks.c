@@ -4878,19 +4878,21 @@ static void RestoreClickThrough(void)
 // Toggle click-through + 70% transparency on the current window.
 static void ActionClickThrough(HWND hwnd)
 {
-    // Apply to the top-level window rather than a clicked child control.
-    HWND root = GetAncestor(hwnd, GA_ROOT);
-    if (root) hwnd = root;
-    if (!IsWindow(hwnd)) return;
-
-    // If a window is already click-through, the shortcut toggles it back
-    // to its original state (whatever the current foreground window is).
+    // If a window is already click-through, the shortcut toggles it back to
+    // its original state. Do this before looking at the target: the current
+    // foreground window may be a popup/context menu (or even invalid) and
+    // that must not prevent restoring the real click-through window.
     if (g_ct_hwnd) {
         int was_alive = IsWindow(g_ct_hwnd);
         RestoreClickThrough();
         if (was_alive) return;
         // Otherwise the window is gone; fall through and apply to the new one.
     }
+
+    // Apply to the top-level window rather than a clicked child control.
+    HWND root = GetAncestor(hwnd, GA_ROOT);
+    if (root) hwnd = root;
+    if (!IsWindow(hwnd)) return;
 
     LONG_PTR exstyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
 
@@ -6230,7 +6232,9 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (IsActionInList((enum action)action.ac, noinitactions)) {
                 // Some actions pass directly through the default blacklists...
                 HWND targethwnd = ptwindow? WindowFromPoint(pt): GetForegroundWindow();
-                if (IsWindow(targethwnd)) {
+                // ClickThrough may need to restore the tracked window even when
+                // there is no valid target (e.g. a context menu is open).
+                if (IsWindow(targethwnd) || action.ac == AC_CLICKTHROUGH) {
                     SClickActions(targethwnd, action);
                 }
             } else {

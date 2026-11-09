@@ -1408,6 +1408,8 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
     if (msg == WM_INITDIALOG) {
         edit_shortcut_idx = 0;
         ReadDialogOptions(hwnd, optlst, ARR_SZ(optlst));
+        SetDlgItemInt(hwnd, IDC_CT_TRANSP,
+            GetPrivateProfileInt(TEXT("Advanced"), TEXT("ClickThroughTransparency"), 50, inipath), FALSE);
         // Agressive Pause
         CheckConfigHotKeys(hotkeys, hwnd, TEXT("Hotkeys"), TEXT("A4 A5"));
 
@@ -1605,6 +1607,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
                 { IDC_SHORTCUTS_CLEAR, L10NIDX(InputHotkeysShortcutsClear) },
                 { IDC_SHORTCUTS_SET,   L10NIDX(InputHotkeysShortcutsSet) },
                 { IDC_USEPTWINDOW,     L10NIDX(InputHotkeysUsePtWindow) },
+                { IDC_CT_TRANSP_H,     L10NIDX(InputClickThroughTransparency) },
                 { IDC_LEFTALT,         L10NIDX(InputHotkeysLeftAlt) },
                 { IDC_RIGHTALT,        L10NIDX(InputHotkeysRightAlt) },
                 { IDC_LEFTWINKEY,      L10NIDX(InputHotkeysLeftWinkey) },
@@ -1632,6 +1635,13 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
             // Hotkeys
             SaveHotKeys(hotkeys, hwnd, TEXT("Hotkeys"));
             WriteOptionBool(IDC_KEYCOMBO,  TEXT("Input"), "KeyCombo");
+            // Click-through transparency (percent)
+            {
+                TCHAR tv[UINT_DIGITS+1];
+                int transp = CLAMP(0, GetDlgItemInt(hwnd, IDC_CT_TRANSP, NULL, FALSE), 100);
+                WritePrivateProfileString(TEXT("Advanced"), TEXT("ClickThroughTransparency"),
+                                          Uint2lStr(tv, transp), inipath);
+            }
             UpdateSettings();
             have_to_apply = 0;
         }

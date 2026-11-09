@@ -210,5 +210,7 @@
 #define IDC_SHORTCUTS_CLEAR             2105
 #define IDC_USEPTWINDOW                 2106
 #define IDC_SIDESFRACTION               2107
+#define IDC_CT_TRANSP_H                 2108
+#define IDC_CT_TRANSP                   2109
 
 #endif // AS_RESOURCE_H
