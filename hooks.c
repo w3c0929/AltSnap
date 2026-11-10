@@ -2744,7 +2744,7 @@ static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
 static HWND g_ct_focus_cand = NULL;  // Hover-focus candidate while click-through is active.
 static int g_ct_focus_cnt = 0;       // Ticks the candidate has been under the pointer.
 static HWND g_ct_last_target = NULL;      // Locked target window for the click-through.
-static int g_ct_toggle_consumed = 0;      // A toggle was already handled for this key press.
+static DWORD g_ct_toggle_tick = 0;        // Time of the last toggle (debounce).
 // Parse a hexadecimal pointer value.
 static ULONG_PTR CtHex2Ptr(const TCHAR *s)
 {
@@ -2781,7 +2781,6 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             g_ct_key_down = 1;
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             g_ct_key_down = 0;
-            g_ct_toggle_consumed = 0;
             KillTimer(g_mainhwnd, CTHOLD_TIMER);
             if (g_ct_hold_active && conf.ClickThroughHoldMode) {
                 RestoreClickThrough();
@@ -4723,6 +4722,16 @@ static void ActionASOnOff()
     if (state.action.ac) FinishMovementAsync();
     state.altsnaponoff = !GetProp(g_mainhwnd, APP_ASONOFF);
     SetProp(g_mainhwnd, APP_ASONOFF, (HANDLE)(DorQWORD)state.altsnaponoff);
+    if (state.altsnaponoff) {
+        // Suspending AltSnap: turn off any click-through, forget its target and
+        // stop the hold timer so ClickThrough is fully managed by this switch.
+        RestoreClickThrough();
+        g_ct_hold_active = 0;
+        g_ct_key_down = 0;
+        g_ct_last_target = NULL;
+        g_ct_toggle_tick = 0;
+        KillTimer(g_mainhwnd, CTHOLD_TIMER);
+    }
     PostMessage(g_mainhwnd, WM_UPDATETRAY, 0, 0);
 }
 static void ActionMoveOnOff(HWND hwnd)
@@ -5003,6 +5012,10 @@ static void RestoreClickThrough(void)
 // already click-through: only one click-through is allowed at a time.
 static void ActionClickThrough(HWND hwnd)
 {
+    // ClickThrough is managed by ASOnOff: while AltSnap is suspended it cannot
+    // be enabled.
+    if (state.altsnaponoff) return;
+
     // A click-through is already active: ignore requests coming from other
     // windows (e.g. a mouse action passed through the click-through window).
     // An explicit shortcut press restores it instead (handled by the callers),
@@ -6428,7 +6441,7 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     // Hold mode: enable on press only if the key is still down.
                     // If it was already released (very short tap), do nothing:
                     // this queued message may be handled after the key-up.
-                    if (!g_ct_hold_active && g_ct_key_down) {
+                    if (!g_ct_hold_active && g_ct_key_down && !state.altsnaponoff) {
                         g_ct_hold_active = 1;
                         // Poll for the release as a safety net (the key-up
                         // event can occasionally be missed).
@@ -6443,10 +6456,12 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return 0;
                 }
                 if (action.ac == AC_CLICKTHROUGH && !conf.ClickThroughHoldMode && wParam > 0xC000) {
-                    // Toggle mode: ignore key auto-repeat so holding the shortcut
-                    // does not toggle several times.
-                    if (g_ct_key_down && g_ct_toggle_consumed) return 0;
-                    if (g_ct_key_down) g_ct_toggle_consumed = 1;
+                    // Toggle mode: debounce repeated/auto-repeat triggers. A key
+                    // state check is not used because some keys (e.g. Pause) do
+                    // not emit a key-up event.
+                    DWORD now = GetTickCount();
+                    if (g_ct_toggle_tick && (DWORD)(now - g_ct_toggle_tick) < 300) return 0;
+                    g_ct_toggle_tick = now;
                 }
                 if (action.ac == AC_CLICKTHROUGH && g_ct_hwnd) {
                     // Toggle mode / CLI: restore the active click-through.
@@ -6846,7 +6861,10 @@ void registerAllHotkeys(const TCHAR* inipath)
         if(!pp) continue;
 
         WORD HK = strtoi(p = ++pp); // Read HOTKEY
-        if(LOBYTE(HK) && HIBYTE(HK)) {
+        // A bare key (no modifier, HIBYTE == 0) is allowed too, so the user can
+        // bind a customizable single-key shortcut. Note: this is a global
+        // hotkey, so the chosen key will be captured system-wide.
+        if(LOBYTE(HK)) {
             // Lobyte is the virtual key code and hibyte is the mod_key
             if (RegisterHotKey(g_mainhwnd, 0xC001 + idx, HIBYTE(HK), LOBYTE(HK))) {
                 conf.KBShortcutsList[idx] = action; // Add action to the list
