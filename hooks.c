@@ -2733,6 +2733,7 @@ static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
 // ClickThrough "hold" mode state.
 static UCHAR g_ct_hotkey_vk = 0;   // VK of the ClickThrough shortcut.
+static UCHAR g_ct_hotkey_mods = 0; // MOD_* required by the shortcut.
 static int g_ct_key_down = 0;      // Is the ClickThrough shortcut key physically down?
 static int g_ct_hold_active = 0;   // Shortcut is held; click-through is active.
 static HWND g_ct_hwnd = NULL;      // Window currently in click-through state.
@@ -2741,9 +2742,9 @@ static BYTE g_ct_oldalpha = 255;   // Original alpha (255 if not layered).
 static int g_ct_alpha_changed = 0; // Did we change the alpha?
 static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persistence.
 static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
-static HWND g_ct_last_target = NULL;      // Locked target window for the click-through.
 static DWORD g_ct_toggle_tick = 0;        // Time of the last toggle (stale guard).
-static int g_ct_consumed = 0;             // Keydown already served (auto-repeat guard).
+static int g_ct_press_seq = 0;            // Incremented on each real key press.
+static int g_ct_handled_seq = 0;          // Press sequence already served.
 // Parse a hexadecimal pointer value.
 static ULONG_PTR CtHex2Ptr(const TCHAR *s)
 {
@@ -2760,6 +2761,35 @@ static ULONG_PTR CtHex2Ptr(const TCHAR *s)
 }
 static void RestoreClickThrough(void);
 static void ActionClickThrough(HWND hwnd);
+// Are the modifier keys of the ClickThrough shortcut currently down? The hook
+// sees the bare key code, so the modifiers must be checked explicitly.
+static int CtHotkeyModsDown(void)
+{
+    if ((g_ct_hotkey_mods & MOD_ALT)     && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return 0;
+    if ((g_ct_hotkey_mods & MOD_CONTROL) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return 0;
+    if ((g_ct_hotkey_mods & MOD_SHIFT)   && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return 0;
+    if ((g_ct_hotkey_mods & MOD_WIN)
+    && !(((GetAsyncKeyState(VK_LWIN)|GetAsyncKeyState(VK_RWIN)) & 0x8000))) return 0;
+    return 1;
+}
+// Hold mode: start the click-through right on the key-down event. Doing it
+// here instead of waiting for WM_HOTKEY avoids the message being handled only
+// after the key-up on a quick tap, which used to make the shortcut silently
+// do nothing (intermittent "sometimes it works" behaviour).
+static void BeginClickThroughHold(void)
+{
+    if (g_ct_hold_active || state.altsnaponoff || !conf.ClickThroughHoldMode) return;
+    if (!CtHotkeyModsDown()) return;
+    g_ct_hold_active = 1;
+    SetTimer(g_mainhwnd, CTHOLD_TIMER, 100, (TIMERPROC)TimerWindowProc);
+    if (g_ct_hwnd && !IsWindow(g_ct_hwnd)) RestoreClickThrough();
+    if (!g_ct_hwnd) { // only one click-through at a time
+        POINT pt;
+        GetCursorPos(&pt);
+        HWND thw = conf.UsePtWindow? WindowFromPoint(pt): GetForegroundWindow();
+        if (IsWindow(thw)) ActionClickThrough(thw);
+    }
+}
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
 #ifdef __cplusplus
@@ -2777,10 +2807,15 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
     if (nCode == HC_ACTION && g_ct_hotkey_vk
     && ((PKBDLLHOOKSTRUCT)lParam)->vkCode == g_ct_hotkey_vk) {
         if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN) {
+            // Count real presses only: auto-repeat keeps the key down, so
+            // g_ct_key_down is already set and the sequence is not advanced.
+            if (!g_ct_key_down) {
+                g_ct_press_seq++;
+                if (!state.ignorekey) BeginClickThroughHold();
+            }
             g_ct_key_down = 1;
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             g_ct_key_down = 0;
-            g_ct_consumed = 0; // A new press may toggle again.
             KillTimer(g_mainhwnd, CTHOLD_TIMER);
             if (g_ct_hold_active && conf.ClickThroughHoldMode) {
                 RestoreClickThrough();
@@ -4728,8 +4763,7 @@ static void ActionASOnOff()
         RestoreClickThrough();
         g_ct_hold_active = 0;
         g_ct_key_down = 0;
-        g_ct_consumed = 0;
-        g_ct_last_target = NULL;
+        g_ct_press_seq = g_ct_handled_seq;
         g_ct_toggle_tick = 0;
         KillTimer(g_mainhwnd, CTHOLD_TIMER);
     }
@@ -5012,7 +5046,6 @@ static void RestoreClickThrough(void)
 {
     HWND hwnd = g_ct_hwnd;
     g_ct_hwnd = NULL;
-    g_ct_last_target = hwnd;
     if (!IsWindow(hwnd)) return;
 
     LONG_PTR exstyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
@@ -5053,15 +5086,6 @@ static void ActionClickThrough(HWND hwnd)
         RestoreClickThrough();           // the tracked window is gone; clear it
     }
 
-    // Always stick to the same target window until it is closed, so repeating
-    // the shortcut never drifts to a window that hovering/clicking focused.
-    if (g_ct_last_target) {
-        if (IsWindow(g_ct_last_target))
-            hwnd = g_ct_last_target;
-        else
-            g_ct_last_target = NULL; // target gone; allow picking a new one
-    }
-
     // Apply to the top-level window rather than a clicked child control.
     HWND root = GetAncestor(hwnd, GA_ROOT);
     if (root) hwnd = root;
@@ -5078,7 +5102,6 @@ static void ActionClickThrough(HWND hwnd)
     int already_transparent = have_alpha && alpha != 255;
 
     g_ct_hwnd = hwnd;
-    g_ct_last_target = hwnd;
     g_ct_exstyle = exstyle;
     g_ct_oldalpha = have_alpha ? alpha : 255;
     g_ct_alpha_changed = !already_transparent;
@@ -6446,27 +6469,21 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return 0;
                 }
                 if (action.ac == AC_CLICKTHROUGH && !conf.ClickThroughHoldMode && wParam > 0xC000) {
-                    // Toggle mode: debounce repeated/auto-repeat triggers. A key
-                    // state check is not used because some keys (e.g. Pause) do
-                    // not emit a key-up event.
-                    // Suppress only auto-repeat from holding the key: the low
-                    // level hook marks the keydown as consumed and clears it on
-                    // key-up. Distinct presses always act, so fast repeated
-                    // presses stay as responsive as hold mode. A stale flag
-                    // (missed key-up) is ignored after 1s so the shortcut can
-                    // never lock up.
+                    // Toggle mode: serve one toggle per physical key press.
+                    // The low level hook advances g_ct_press_seq on each real
+                    // keydown, so a press whose message is handled after its
+                    // key-up still counts once. Holding the key only produces
+                    // auto-repeat messages, which share the same sequence and
+                    // are dropped here. A stale sequence (missed key-up) is
+                    // ignored after 1s so the shortcut can never lock up.
                     DWORD now = GetTickCount();
-                    if (g_ct_key_down && g_ct_consumed) {
-                        if (g_ct_hotkey_vk && !(GetAsyncKeyState(g_ct_hotkey_vk) & 0x8000)) {
-                            // Key-up was missed (or the key emits no key-up):
-                            // treat this as a fresh press.
-                            g_ct_key_down = 0;
-                            g_ct_consumed = 0;
-                        } else if (g_ct_toggle_tick && (DWORD)(now - g_ct_toggle_tick) < 1000) {
-                            return 0; // auto-repeat of a held key
-                        }
+                    if (g_ct_press_seq == g_ct_handled_seq
+                    && g_ct_key_down && g_ct_hotkey_vk
+                    && (GetAsyncKeyState(g_ct_hotkey_vk) & 0x8000)
+                    && g_ct_toggle_tick && (DWORD)(now - g_ct_toggle_tick) < 1000) {
+                        return 0; // auto-repeat of a held key
                     }
-                    g_ct_consumed = 1;
+                    g_ct_handled_seq = g_ct_press_seq;
                     g_ct_toggle_tick = now;
                 }
                 if (action.ac == AC_CLICKTHROUGH && g_ct_hwnd) {
@@ -6875,7 +6892,10 @@ void registerAllHotkeys(const TCHAR* inipath)
             // Lobyte is the virtual key code and hibyte is the mod_key
             if (RegisterHotKey(g_mainhwnd, 0xC001 + idx, HIBYTE(HK), LOBYTE(HK))) {
                 conf.KBShortcutsList[idx] = action; // Add action to the list
-                if (action.ac == AC_CLICKTHROUGH) g_ct_hotkey_vk = LOBYTE(HK);
+                if (action.ac == AC_CLICKTHROUGH) {
+                    g_ct_hotkey_vk = LOBYTE(HK);
+                    g_ct_hotkey_mods = HIBYTE(HK);
+                }
                 LOG("OK registering hotkey %s_%d_%d=%x, [idx=%d]", action_names[action.ac], (int)action.fl, (int)action.wp, (unsigned)HK, (int)idx);
                 idx++;
             } else {
