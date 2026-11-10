@@ -23,6 +23,7 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 #define HIDELAYOUT_TIMER  (6)
 #define POOL_TIMER        (7)
 #define CTHOLD_TIMER      (8)
+#define CTSAVE_TIMER      (9)
 
 #define WM_DOWORK        (WM_APP+6)
 #define WM_DOMOUSEMOVE   (WM_APP+7)
@@ -2741,7 +2742,8 @@ static int g_ct_alpha_changed = 0; // Did we change the alpha?
 static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persistence.
 static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
 static HWND g_ct_last_target = NULL;      // Locked target window for the click-through.
-static DWORD g_ct_toggle_tick = 0;        // Time of the last toggle (debounce).
+static DWORD g_ct_toggle_tick = 0;        // Time of the last toggle (stale guard).
+static int g_ct_consumed = 0;             // Keydown already served (auto-repeat guard).
 // Parse a hexadecimal pointer value.
 static ULONG_PTR CtHex2Ptr(const TCHAR *s)
 {
@@ -2778,6 +2780,7 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
             g_ct_key_down = 1;
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) {
             g_ct_key_down = 0;
+            g_ct_consumed = 0; // A new press may toggle again.
             KillTimer(g_mainhwnd, CTHOLD_TIMER);
             if (g_ct_hold_active && conf.ClickThroughHoldMode) {
                 RestoreClickThrough();
@@ -4725,6 +4728,7 @@ static void ActionASOnOff()
         RestoreClickThrough();
         g_ct_hold_active = 0;
         g_ct_key_down = 0;
+        g_ct_consumed = 0;
         g_ct_last_target = NULL;
         g_ct_toggle_tick = 0;
         KillTimer(g_mainhwnd, CTHOLD_TIMER);
@@ -4904,29 +4908,59 @@ static HWND FindTiledWindow(HWND hwnd, unsigned char direction)
 
 // Crash-recovery persistence: remember the target window and its original
 // style so a restart can undo a click-through left by a crash or a forced kill.
-static void ClearClickThroughState(void)
+// Append a "name=value\0" pair to a WritePrivateProfileSection buffer.
+static void AppendIniPair(TCHAR **p, const TCHAR *name, const TCHAR *val)
 {
-    if (!g_ct_inipath[0]) return;
-    WritePrivateProfileString(TEXT("ClickThrough"), NULL, NULL, g_ct_inipath);
+    TCHAR *d = *p;
+    lstrcpy(d, name);
+    d += lstrlen(d);
+    *d++ = TEXT('=');
+    lstrcpy(d, val);
+    d += lstrlen(d);
+    *d++ = TEXT('\0');
+    *d = TEXT('\0');
+    *p = d;
 }
 
+// Write the whole section in one call: a single file rewrite instead of one
+// rewrite per key. This matters when the ini lives on a slow/synced folder.
 static void SaveClickThroughState(void)
 {
     if (!g_ct_inipath[0] || !g_ct_hwnd) return;
-    TCHAR hex[LPTR_HDIGITS+1], nb[UINT_DIGITS+1], cls[64];
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("Hwnd"),
-        LPTR2Hex(hex, (ULONG_PTR)g_ct_hwnd), g_ct_inipath);
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("ExStyle"),
-        LPTR2Hex(hex, (ULONG_PTR)g_ct_exstyle), g_ct_inipath);
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("OldAlpha"),
-        Uint2lStr(nb, g_ct_oldalpha), g_ct_inipath);
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("AlphaChanged"),
-        g_ct_alpha_changed ? TEXT("1") : TEXT("0"), g_ct_inipath);
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("AppliedAlpha"),
-        Uint2lStr(nb, g_ct_applied_alpha), g_ct_inipath);
+    TCHAR buf[512], hex[LPTR_HDIGITS+1], nb[UINT_DIGITS+1], cls[64];
+    TCHAR *p = buf;
+    AppendIniPair(&p, TEXT("Hwnd"), LPTR2Hex(hex, (ULONG_PTR)g_ct_hwnd));
+    AppendIniPair(&p, TEXT("ExStyle"), LPTR2Hex(hex, (ULONG_PTR)g_ct_exstyle));
+    AppendIniPair(&p, TEXT("OldAlpha"), Uint2lStr(nb, g_ct_oldalpha));
+    AppendIniPair(&p, TEXT("AlphaChanged"), g_ct_alpha_changed ? TEXT("1") : TEXT("0"));
+    AppendIniPair(&p, TEXT("AppliedAlpha"), Uint2lStr(nb, g_ct_applied_alpha));
     cls[0] = TEXT('\0');
     GetClassName(g_ct_hwnd, cls, ARR_SZ(cls));
-    WritePrivateProfileString(TEXT("ClickThrough"), TEXT("Class"), cls, g_ct_inipath);
+    AppendIniPair(&p, TEXT("Class"), cls);
+    WritePrivateProfileSection(TEXT("ClickThrough"), buf, g_ct_inipath);
+}
+
+static void ClearClickThroughState(void)
+{
+    if (!g_ct_inipath[0]) return;
+    WritePrivateProfileSection(TEXT("ClickThrough"), NULL, g_ct_inipath);
+}
+
+// Persisting a crash-recovery snapshot writes the ini file. During fast
+// repeated toggling that would rewrite the (possibly synced) ini dozens of
+// times per second, which causes visible lag. So only write once things settle.
+static void ScheduleClickThroughPersist(void)
+{
+    if (!g_ct_inipath[0]) return;
+    KillTimer(g_mainhwnd, CTSAVE_TIMER);
+    SetTimer(g_mainhwnd, CTSAVE_TIMER, 600, (TIMERPROC)TimerWindowProc);
+}
+
+static void FlushClickThroughPersist(void)
+{
+    KillTimer(g_mainhwnd, CTSAVE_TIMER);
+    if (g_ct_hwnd) SaveClickThroughState();
+    else ClearClickThroughState();
 }
 
 // Undo a click-through left over from a previous (crashed) session, then clear
@@ -4999,7 +5033,7 @@ static void RestoreClickThrough(void)
                  0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     g_ct_alpha_changed = 0;
     g_ct_applied_alpha = 0;
-    ClearClickThroughState();
+    ScheduleClickThroughPersist();
 }
 
 // Enable click-through on the current window. Does nothing if a window is
@@ -5066,7 +5100,7 @@ static void ActionClickThrough(HWND hwnd)
     // Keep the click-through window on top of the other windows.
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
 
-    SaveClickThroughState();
+    ScheduleClickThroughPersist();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -5942,6 +5976,10 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
             KillTimer(hwnd, CTHOLD_TIMER);
         }
         } break;
+    case CTSAVE_TIMER: {
+        // Persist the settled click-through state (see ScheduleClickThroughPersist).
+        FlushClickThroughPersist();
+        } break;
     case SPEED_TIMER: {
         static POINT oldpt;
         static int has_moved_to_fixed_pt;
@@ -6411,8 +6449,24 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     // Toggle mode: debounce repeated/auto-repeat triggers. A key
                     // state check is not used because some keys (e.g. Pause) do
                     // not emit a key-up event.
+                    // Suppress only auto-repeat from holding the key: the low
+                    // level hook marks the keydown as consumed and clears it on
+                    // key-up. Distinct presses always act, so fast repeated
+                    // presses stay as responsive as hold mode. A stale flag
+                    // (missed key-up) is ignored after 1s so the shortcut can
+                    // never lock up.
                     DWORD now = GetTickCount();
-                    if (g_ct_toggle_tick && (DWORD)(now - g_ct_toggle_tick) < 300) return 0;
+                    if (g_ct_key_down && g_ct_consumed) {
+                        if (g_ct_hotkey_vk && !(GetAsyncKeyState(g_ct_hotkey_vk) & 0x8000)) {
+                            // Key-up was missed (or the key emits no key-up):
+                            // treat this as a fresh press.
+                            g_ct_key_down = 0;
+                            g_ct_consumed = 0;
+                        } else if (g_ct_toggle_tick && (DWORD)(now - g_ct_toggle_tick) < 1000) {
+                            return 0; // auto-repeat of a held key
+                        }
+                    }
+                    g_ct_consumed = 1;
                     g_ct_toggle_tick = now;
                 }
                 if (action.ac == AC_CLICKTHROUGH && g_ct_hwnd) {
@@ -6505,6 +6559,7 @@ __declspec(dllexport) void WINAPI Unload()
     KillAllTimers();
     KillAltSnapMenu();
     RestoreClickThrough(); // Undo any pending click-through state.
+    ClearClickThroughState(); // Persist the cleared state now: no timer will run.
     if (conf.TransWinOpacity) {
         DestroyWindow(g_transhwnd[0]);
         g_transhwnd[0] = NULL;
