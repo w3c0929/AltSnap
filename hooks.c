@@ -23,7 +23,6 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 #define HIDELAYOUT_TIMER  (6)
 #define POOL_TIMER        (7)
 #define CTHOLD_TIMER      (8)
-#define CTFOCUS_TIMER     (9)
 
 #define WM_DOWORK        (WM_APP+6)
 #define WM_DOMOUSEMOVE   (WM_APP+7)
@@ -2741,8 +2740,6 @@ static BYTE g_ct_oldalpha = 255;   // Original alpha (255 if not layered).
 static int g_ct_alpha_changed = 0; // Did we change the alpha?
 static TCHAR g_ct_inipath[MAX_PATH]; // ini path used for crash-recovery persistence.
 static BYTE g_ct_applied_alpha = 0;  // alpha we set, 0 if unchanged.
-static HWND g_ct_focus_cand = NULL;  // Hover-focus candidate while click-through is active.
-static int g_ct_focus_cnt = 0;       // Ticks the candidate has been under the pointer.
 static HWND g_ct_last_target = NULL;      // Locked target window for the click-through.
 static DWORD g_ct_toggle_tick = 0;        // Time of the last toggle (debounce).
 // Parse a hexadecimal pointer value.
@@ -4982,9 +4979,6 @@ static void RestoreClickThrough(void)
     HWND hwnd = g_ct_hwnd;
     g_ct_hwnd = NULL;
     g_ct_last_target = hwnd;
-    KillTimer(g_mainhwnd, CTFOCUS_TIMER);
-    g_ct_focus_cand = NULL;
-    g_ct_focus_cnt = 0;
     if (!IsWindow(hwnd)) return;
 
     LONG_PTR exstyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
@@ -5071,12 +5065,6 @@ static void ActionClickThrough(HWND hwnd)
 
     // Keep the click-through window on top of the other windows.
     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
-
-    // While click-through is active, let the keyboard focus follow the pointer
-    // so the user can interact with the window behind it without clicking.
-    g_ct_focus_cand = NULL;
-    g_ct_focus_cnt = 0;
-    SetTimer(g_mainhwnd, CTFOCUS_TIMER, 100, (TIMERPROC)TimerWindowProc);
 
     SaveClickThroughState();
 }
@@ -5953,42 +5941,6 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
             g_ct_hold_active = 0;
             KillTimer(hwnd, CTHOLD_TIMER);
         }
-        } break;
-    case CTFOCUS_TIMER: {
-        // While a window is click-through, move the keyboard focus to the
-        // window under the pointer (the one behind it), with a short dwell.
-        if (!g_ct_hwnd || !IsWindow(g_ct_hwnd)) { KillTimer(hwnd, CTFOCUS_TIMER); break; }
-        if (state.action.ac || state.blockmouseup || state.ignoreclick) break;
-        if ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000) {
-            g_ct_focus_cand = NULL; g_ct_focus_cnt = 0; break;
-        }
-        POINT pt; GetCursorPos(&pt);
-        HWND h = WindowFromPoint(pt);
-        if (h) h = GetAncestor(h, GA_ROOT);
-        int skip = 0;
-        if (!h || h == g_ct_hwnd || !IsWindow(h) || IsIconic(h) || !IsWindowVisible(h)) {
-            skip = 1;
-        } else if (h == GetShellWindow() || h == GetDesktopWindow()) {
-            skip = 1;
-        } else {
-            TCHAR cls[64]; cls[0] = TEXT('\0');
-            GetClassName(h, cls, ARR_SZ(cls));
-            if (!lstrcmpi(cls, TEXT("Progman")) || !lstrcmpi(cls, TEXT("WorkerW"))
-            || !lstrcmpi(cls, TEXT("Shell_TrayWnd")) || !lstrcmpi(cls, TEXT("Shell_SecondaryTrayWnd"))
-            || !lstrcmpi(cls, TEXT("#32768")) || !lstrcmpi(cls, TEXT("tooltips_class32"))) {
-                skip = 1;
-            } else {
-                DWORD pid = 0;
-                GetWindowThreadProcessId(h, &pid);
-                if (pid == GetCurrentProcessId()) skip = 1;
-                else if (blacklisted(h, &BlkLst.Windows) || blacklisted(h, &BlkLst.Processes)) skip = 1;
-            }
-        }
-        if (skip) { g_ct_focus_cand = NULL; g_ct_focus_cnt = 0; break; }
-        if (h == g_ct_focus_cand) g_ct_focus_cnt++;
-        else { g_ct_focus_cand = h; g_ct_focus_cnt = 0; }
-        if (g_ct_focus_cnt == 2 && h != GetForegroundWindow())
-            ReallySetForegroundWindow(h);
         } break;
     case SPEED_TIMER: {
         static POINT oldpt;
